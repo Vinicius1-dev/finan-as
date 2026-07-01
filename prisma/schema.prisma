@@ -1,0 +1,124 @@
+// FinPro — Gestor de Finanças Pessoais
+// Modelo de dados relacional (equivalente ao que seria feito em Django/SQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// CONTA — onde o dinheiro fica (dinheiro, banco, cartão)
+// ============================================================
+model Account {
+  id            String        @id @default(cuid())
+  name          String
+  type          String        @default("cash") // cash | bank | card
+  initialBalance Float        @default(0)
+  color         String        @default("#6B7280")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  transactions  Transaction[] @relation("AccountTransactions")
+  transfersIn   Transaction[] @relation("TransferTo")
+  budgets        Budget[]
+
+  @@index([type])
+}
+
+// ============================================================
+// CATEGORIA — classificação de receitas/despesas
+// ============================================================
+model Category {
+  id        String        @id @default(cuid())
+  name      String
+  type      String        @default("expense") // income | expense
+  color     String        @default("#6B7280")
+  icon      String        @default("Circle")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@index([type])
+}
+
+// ============================================================
+// TRANSAÇÃO — lançamento financeiro
+// ============================================================
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String   @default("expense") // income | expense | transfer
+  amount      Float
+  description String
+  date        DateTime
+  accountId   String
+  categoryId  String?
+  transferToAccountId String?
+
+  account     Account  @relation("AccountTransactions", fields: [accountId], references: [id])
+  category    Category? @relation(fields: [categoryId], references: [id])
+  transferTo  Account? @relation("TransferTo", fields: [transferToAccountId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([categoryId])
+  @@index([type])
+  @@index([date])
+}
+
+// ============================================================
+// ORÇAMENTO — limite de gasto por categoria/mês
+// ============================================================
+model Budget {
+  id         String   @id @default(cuid())
+  amount     Float
+  month      Int      // 1-12
+  year       Int
+  categoryId String
+  accountId  String
+
+  category   Category @relation(fields: [categoryId], references: [id])
+  account    Account  @relation(fields: [accountId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([categoryId, month, year, accountId])
+  @@index([month, year])
+}
+
+// ============================================================
+// META — objetivo financeiro com prazo
+// ============================================================
+model Goal {
+  id             String   @id @default(cuid())
+  title          String
+  targetAmount   Float
+  currentAmount  Float    @default(0)
+  deadline       DateTime
+  color          String   @default("#10B981")
+  isCompleted    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contributions GoalContribution[]
+}
+
+model GoalContribution {
+  id        String   @id @default(cuid())
+  goalId    String
+  amount    Float
+  date      DateTime @default(now())
+  note      String?
+
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId])
+}

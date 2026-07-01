@@ -1,0 +1,1107 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useState } from "react";
+     4→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     5→import { toast } from "sonner";
+     6→import {
+     7→  ArrowDownRight,
+     8→  ArrowLeftRight,
+     9→  ArrowUpRight,
+    10→  Filter,
+    11→  Inbox,
+    12→  Loader2,
+    13→  MoreHorizontal,
+    14→  Pencil,
+    15→  Plus,
+    16→  Search,
+    17→  Trash2,
+    18→  X,
+    19→} from "lucide-react";
+    20→import type {
+    21→  Account,
+    22→  Category,
+    23→  Transaction,
+    24→  TransactionType,
+    25→} from "@/lib/types";
+    26→import { formatCurrency, formatDate } from "@/lib/format";
+    27→import { cn } from "@/lib/utils";
+    28→import { useFinProStore } from "@/store/finpro-store";
+    29→import { Card, CardContent } from "@/components/ui/card";
+    30→import { Button } from "@/components/ui/button";
+    31→import { Input } from "@/components/ui/input";
+    32→import { Label } from "@/components/ui/label";
+    33→import { Badge } from "@/components/ui/badge";
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectItem,
+    38→  SelectTrigger,
+    39→  SelectValue,
+    40→} from "@/components/ui/select";
+    41→import {
+    42→  Dialog,
+    43→  DialogContent,
+    44→  DialogDescription,
+    45→  DialogFooter,
+    46→  DialogHeader,
+    47→  DialogTitle,
+    48→} from "@/components/ui/dialog";
+    49→import {
+    50→  AlertDialog,
+    51→  AlertDialogAction,
+    52→  AlertDialogCancel,
+    53→  AlertDialogContent,
+    54→  AlertDialogDescription,
+    55→  AlertDialogFooter,
+    56→  AlertDialogHeader,
+    57→  AlertDialogTitle,
+    58→} from "@/components/ui/alert-dialog";
+    59→import {
+    60→  DropdownMenu,
+    61→  DropdownMenuContent,
+    62→  DropdownMenuItem,
+    63→  DropdownMenuTrigger,
+    64→} from "@/components/ui/dropdown-menu";
+    65→import {
+    66→  Table,
+    67→  TableBody,
+    68→  TableCell,
+    69→  TableHead,
+    70→  TableHeader,
+    71→  TableRow,
+    72→} from "@/components/ui/table";
+    73→import { Skeleton } from "@/components/ui/skeleton";
+    74→import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+    75→import { EmptyState } from "@/components/finpro/shared/empty-state";
+    76→
+    77→// ---------------- helpers ----------------
+    78→
+    79→const TYPE_OPTIONS: { value: string; label: string }[] = [
+    80→  { value: "all", label: "Todos" },
+    81→  { value: "income", label: "Receitas" },
+    82→  { value: "expense", label: "Despesas" },
+    83→  { value: "transfer", label: "Transferências" },
+    84→];
+    85→
+    86→const TYPE_LABELS: Record<TransactionType, string> = {
+    87→  income: "Receita",
+    88→  expense: "Despesa",
+    89→  transfer: "Transferência",
+    90→};
+    91→
+    92→const TYPE_RADIO_OPTIONS: {
+    93→  value: TransactionType;
+    94→  label: string;
+    95→  color: string;
+    96→}[] = [
+    97→  {
+    98→    value: "income",
+    99→    label: "Receita",
+   100→    color: "text-emerald-600 dark:text-emerald-400",
+   101→  },
+   102→  {
+   103→    value: "expense",
+   104→    label: "Despesa",
+   105→    color: "text-rose-600 dark:text-rose-400",
+   106→  },
+   107→  {
+   108→    value: "transfer",
+   109→    label: "Transferência",
+   110→    color: "text-blue-600 dark:text-blue-400",
+   111→  },
+   112→];
+   113→
+   114→function todayISODate(): string {
+   115→  const d = new Date();
+   116→  const y = d.getFullYear();
+   117→  const m = String(d.getMonth() + 1).padStart(2, "0");
+   118→  const day = String(d.getDate()).padStart(2, "0");
+   119→  return `${y}-${m}-${day}`;
+   120→}
+   121→
+   122→function isoDateToLocalInput(iso: string): string {
+   123→  if (!iso) return todayISODate();
+   124→  const d = new Date(iso);
+   125→  if (isNaN(d.getTime())) return todayISODate();
+   126→  const y = d.getFullYear();
+   127→  const m = String(d.getMonth() + 1).padStart(2, "0");
+   128→  const day = String(d.getDate()).padStart(2, "0");
+   129→  return `${y}-${m}-${day}`;
+   130→}
+   131→
+   132→// ---------------- Type badge ----------------
+   133→
+   134→function TypeBadge({ type }: { type: TransactionType }) {
+   135→  const cls =
+   136→    type === "income"
+   137→      ? "border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+   138→      : type === "expense"
+   139→      ? "border-transparent bg-rose-500/15 text-rose-700 dark:text-rose-300"
+   140→      : "border-transparent bg-blue-500/15 text-blue-700 dark:text-blue-300";
+   141→  return <Badge className={cls}>{TYPE_LABELS[type]}</Badge>;
+   142→}
+   143→
+   144→// ---------------- Amount cell ----------------
+   145→
+   146→function AmountCell({ transaction }: { transaction: Transaction }) {
+   147→  const isIncome = transaction.type === "income";
+   148→  const isTransfer = transaction.type === "transfer";
+   149→  return (
+   150→    <span
+   151→      className={cn(
+   152→        "font-semibold tabular-nums",
+   153→        isIncome
+   154→          ? "text-emerald-600 dark:text-emerald-400"
+   155→          : isTransfer
+   156→          ? "text-blue-600 dark:text-blue-400"
+   157→          : "text-foreground"
+   158→      )}
+   159→    >
+   160→      {isIncome ? "+" : isTransfer ? "" : "-"}
+   161→      {formatCurrency(transaction.amount)}
+   162→    </span>
+   163→  );
+   164→}
+   165→
+   166→// ---------------- Summary cards ----------------
+   167→
+   168→function SummaryCards({ transactions }: { transactions: Transaction[] }) {
+   169→  const totals = useMemo(() => {
+   170→    let income = 0;
+   171→    let expense = 0;
+   172→    for (const t of transactions) {
+   173→      if (t.type === "income") income += t.amount;
+   174→      else if (t.type === "expense") expense += t.amount;
+   175→    }
+   176→    return { income, expense, balance: income - expense };
+   177→  }, [transactions]);
+   178→
+   179→  const cards = [
+   180→    {
+   181→      label: "Receitas totais",
+   182→      value: totals.income,
+   183→      color: "text-emerald-600 dark:text-emerald-400",
+   184→      bg: "bg-emerald-500/10",
+   185→      Icon: ArrowDownRight,
+   186→    },
+   187→    {
+   188→      label: "Despesas totais",
+   189→      value: totals.expense,
+   190→      color: "text-rose-600 dark:text-rose-400",
+   191→      bg: "bg-rose-500/10",
+   192→      Icon: ArrowUpRight,
+   193→    },
+   194→    {
+   195→      label: "Saldo",
+   196→      value: totals.balance,
+   197→      color: "text-primary",
+   198→      bg: "bg-primary/10",
+   199→      Icon: ArrowLeftRight,
+   200→    },
+   201→  ];
+   202→
+   203→  return (
+   204→    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   205→      {cards.map(({ label, value, color, bg, Icon }) => (
+   206→        <Card key={label} className="py-0">
+   207→          <CardContent className="flex items-center gap-4 p-4">
+   208→            <div
+   209→              className={cn(
+   210→                "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+   211→                bg,
+   212→                color
+   213→              )}
+   214→            >
+   215→              <Icon className="h-5 w-5" />
+   216→            </div>
+   217→            <div className="min-w-0">
+   218→              <p className="truncate text-xs font-medium text-muted-foreground">
+   219→                {label}
+   220→              </p>
+   221→              <p
+   222→                className={cn(
+   223→                  "truncate text-lg font-bold tabular-nums",
+   224→                  color
+   225→                )}
+   226→              >
+   227→                {formatCurrency(value)}
+   228→              </p>
+   229→            </div>
+   230→          </CardContent>
+   231→        </Card>
+   232→      ))}
+   233→    </div>
+   234→  );
+   235→}
+   236→
+   237→// ---------------- Filter bar ----------------
+   238→
+   239→interface Filters {
+   240→  type: string;
+   241→  accountId: string;
+   242→  categoryId: string;
+   243→  from: string;
+   244→  to: string;
+   245→  search: string;
+   246→}
+   247→
+   248→const DEFAULT_FILTERS: Filters = {
+   249→  type: "all",
+   250→  accountId: "all",
+   251→  categoryId: "all",
+   252→  from: "",
+   253→  to: "",
+   254→  search: "",
+   255→};
+   256→
+   257→function FilterBar({
+   258→  filters,
+   259→  setFilters,
+   260→  accounts,
+   261→  categories,
+   262→  onReset,
+   263→}: {
+   264→  filters: Filters;
+   265→  setFilters: (f: Filters) => void;
+   266→  accounts: Account[];
+   267→  categories: Category[];
+   268→  onReset: () => void;
+   269→}) {
+   270→  const update = <K extends keyof Filters>(key: K, value: Filters[K]) =>
+   271→    setFilters({ ...filters, [key]: value });
+   272→
+   273→  const hasActive =
+   274→    filters.type !== "all" ||
+   275→    filters.accountId !== "all" ||
+   276→    filters.categoryId !== "all" ||
+   277→    filters.from !== "" ||
+   278→    filters.to !== "" ||
+   279→    filters.search.trim() !== "";
+   280→
+   281→  return (
+   282→    <Card className="py-0">
+   283→      <CardContent className="p-4 sm:p-5">
+   284→        <div className="mb-4 flex items-center justify-between">
+   285→          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+   286→            <Filter className="h-4 w-4" />
+   287→            Filtros
+   288→          </div>
+   289→          <Button
+   290→            variant="ghost"
+   291→            size="sm"
+   292→            className="h-8 text-muted-foreground hover:text-foreground"
+   293→            onClick={onReset}
+   294→            disabled={!hasActive}
+   295→          >
+   296→            <X className="h-4 w-4" />
+   297→            Limpar filtros
+   298→          </Button>
+   299→        </div>
+   300→        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+   301→          {/* Tipo */}
+   302→          <div className="space-y-1.5">
+   303→            <Label className="text-xs text-muted-foreground">Tipo</Label>
+   304→            <Select
+   305→              value={filters.type}
+   306→              onValueChange={(v) => update("type", v)}
+   307→            >
+   308→              <SelectTrigger className="w-full">
+   309→                <SelectValue placeholder="Tipo" />
+   310→              </SelectTrigger>
+   311→              <SelectContent>
+   312→                {TYPE_OPTIONS.map((opt) => (
+   313→                  <SelectItem key={opt.value} value={opt.value}>
+   314→                    {opt.label}
+   315→                  </SelectItem>
+   316→                ))}
+   317→              </SelectContent>
+   318→            </Select>
+   319→          </div>
+   320→
+   321→          {/* Conta */}
+   322→          <div className="space-y-1.5">
+   323→            <Label className="text-xs text-muted-foreground">Conta</Label>
+   324→            <Select
+   325→              value={filters.accountId}
+   326→              onValueChange={(v) => update("accountId", v)}
+   327→            >
+   328→              <SelectTrigger className="w-full">
+   329→                <SelectValue placeholder="Conta" />
+   330→              </SelectTrigger>
+   331→              <SelectContent>
+   332→                <SelectItem value="all">Todas</SelectItem>
+   333→                {accounts.map((a) => (
+   334→                  <SelectItem key={a.id} value={a.id}>
+   335→                    {a.name}
+   336→                  </SelectItem>
+   337→                ))}
+   338→              </SelectContent>
+   339→            </Select>
+   340→          </div>
+   341→
+   342→          {/* Categoria */}
+   343→          <div className="space-y-1.5">
+   344→            <Label className="text-xs text-muted-foreground">Categoria</Label>
+   345→            <Select
+   346→              value={filters.categoryId}
+   347→              onValueChange={(v) => update("categoryId", v)}
+   348→            >
+   349→              <SelectTrigger className="w-full">
+   350→                <SelectValue placeholder="Categoria" />
+   351→              </SelectTrigger>
+   352→              <SelectContent>
+   353→                <SelectItem value="all">Todas</SelectItem>
+   354→                {categories.map((c) => (
+   355→                  <SelectItem key={c.id} value={c.id}>
+   356→                    <span className="inline-flex items-center gap-2">
+   357→                      <span
+   358→                        className="h-2 w-2 rounded-full"
+   359→                        style={{ backgroundColor: c.color }}
+   360→                      />
+   361→                      {c.name}
+   362→                    </span>
+   363→                  </SelectItem>
+   364→                ))}
+   365→              </SelectContent>
+   366→            </Select>
+   367→          </div>
+   368→
+   369→          {/* Busca */}
+   370→          <div className="space-y-1.5">
+   371→            <Label className="text-xs text-muted-foreground">Busca</Label>
+   372→            <div className="relative">
+   373→              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   374→              <Input
+   375→                type="text"
+   376→                placeholder="Descrição..."
+   377→                value={filters.search}
+   378→                onChange={(e) => update("search", e.target.value)}
+   379→                className="pl-8"
+   380→              />
+   381→            </div>
+   382→          </div>
+   383→
+   384→          {/* De */}
+   385→          <div className="space-y-1.5">
+   386→            <Label className="text-xs text-muted-foreground">De</Label>
+   387→            <Input
+   388→              type="date"
+   389→              value={filters.from}
+   390→              onChange={(e) => update("from", e.target.value)}
+   391→              className="w-full"
+   392→            />
+   393→          </div>
+   394→
+   395→          {/* Até */}
+   396→          <div className="space-y-1.5">
+   397→            <Label className="text-xs text-muted-foreground">Até</Label>
+   398→            <Input
+   399→              type="date"
+   400→              value={filters.to}
+   401→              onChange={(e) => update("to", e.target.value)}
+   402→              className="w-full"
+   403→            />
+   404→          </div>
+   405→        </div>
+   406→      </CardContent>
+   407→    </Card>
+   408→  );
+   409→}
+   410→
+   411→// ---------------- Transactions table ----------------
+   412→
+   413→function TransactionsTable({
+   414→  transactions,
+   415→  isLoading,
+   416→  onEdit,
+   417→  onDelete,
+   418→}: {
+   419→  transactions: Transaction[];
+   420→  isLoading: boolean;
+   421→  onEdit: (t: Transaction) => void;
+   422→  onDelete: (t: Transaction) => void;
+   423→}) {
+   424→  if (isLoading) {
+   425→    return (
+   426→      <Card className="py-0">
+   427→        <CardContent className="p-0">
+   428→          <div className="divide-y divide-border">
+   429→            {Array.from({ length: 6 }).map((_, i) => (
+   430→              <div key={i} className="flex items-center gap-3 px-4 py-3">
+   431→                <Skeleton className="h-4 w-20" />
+   432→                <Skeleton className="h-4 max-w-[220px] flex-1" />
+   433→                <Skeleton className="h-4 w-24" />
+   434→                <Skeleton className="h-4 w-24" />
+   435→                <Skeleton className="h-5 w-16 rounded-full" />
+   436→                <Skeleton className="ml-auto h-4 w-24" />
+   437→                <Skeleton className="h-8 w-8 rounded-md" />
+   438→              </div>
+   439→            ))}
+   440→          </div>
+   441→        </CardContent>
+   442→      </Card>
+   443→    );
+   444→  }
+   445→
+   446→  if (transactions.length === 0) {
+   447→    return (
+   448→      <Card className="py-0">
+   449→        <CardContent className="p-0">
+   450→          <EmptyState
+   451→            icon={Inbox}
+   452→            title="Nenhuma transação encontrada"
+   453→            description="Tente ajustar ou limpar os filtros para ver mais resultados."
+   454→          />
+   455→        </CardContent>
+   456→      </Card>
+   457→    );
+   458→  }
+   459→
+   460→  return (
+   461→    <Card className="overflow-hidden py-0">
+   462→      <CardContent className="p-0">
+   463→        <div className="scrollbar-thin max-h-[60vh] overflow-auto">
+   464→          <Table>
+   465→            <TableHeader className="sticky top-0 z-10 bg-card [&_tr]:border-b">
+   466→              <TableRow>
+   467→                <TableHead className="pl-4">Data</TableHead>
+   468→                <TableHead>Descrição</TableHead>
+   469→                <TableHead>Categoria</TableHead>
+   470→                <TableHead>Conta</TableHead>
+   471→                <TableHead>Tipo</TableHead>
+   472→                <TableHead className="text-right">Valor</TableHead>
+   473→                <TableHead className="pr-4 text-right">Ações</TableHead>
+   474→              </TableRow>
+   475→            </TableHeader>
+   476→            <TableBody>
+   477→              {transactions.map((t) => {
+   478→                const cat = t.category;
+   479→                const isTransfer = t.type === "transfer";
+   480→                return (
+   481→                  <TableRow key={t.id} className="hover:bg-muted/40">
+   482→                    <TableCell className="whitespace-nowrap pl-4 text-sm text-muted-foreground">
+   483→                      {formatDate(t.date)}
+   484→                    </TableCell>
+   485→                    <TableCell className="max-w-[260px] truncate font-medium">
+   486→                      {t.description}
+   487→                    </TableCell>
+   488→                    <TableCell>
+   489→                      {cat ? (
+   490→                        <span className="inline-flex items-center gap-2 text-sm">
+   491→                          <span
+   492→                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+   493→                            style={{ backgroundColor: cat.color }}
+   494→                          />
+   495→                          <span className="truncate">{cat.name}</span>
+   496→                        </span>
+   497→                      ) : (
+   498→                        <span className="text-muted-foreground">—</span>
+   499→                      )}
+   500→                    </TableCell>
+   501→                    <TableCell className="text-sm">
+   502→                      {isTransfer && t.transferTo ? (
+   503→                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+   504→                          <span className="truncate">{t.account?.name}</span>
+   505→                          <ArrowLeftRight className="h-3 w-3 shrink-0" />
+   506→                          <span className="truncate">{t.transferTo.name}</span>
+   507→                        </span>
+   508→                      ) : (
+   509→                        <span>{t.account?.name ?? "—"}</span>
+   510→                      )}
+   511→                    </TableCell>
+   512→                    <TableCell>
+   513→                      <TypeBadge type={t.type} />
+   514→                    </TableCell>
+   515→                    <TableCell className="text-right">
+   516→                      <AmountCell transaction={t} />
+   517→                    </TableCell>
+   518→                    <TableCell className="pr-4 text-right">
+   519→                      <DropdownMenu>
+   520→                        <DropdownMenuTrigger asChild>
+   521→                          <Button
+   522→                            variant="ghost"
+   523→                            size="icon"
+   524→                            className="h-8 w-8"
+   525→                            aria-label="Ações da transação"
+   526→                          >
+   527→                            <MoreHorizontal className="h-4 w-4" />
+   528→                          </Button>
+   529→                        </DropdownMenuTrigger>
+   530→                        <DropdownMenuContent align="end">
+   531→                          <DropdownMenuItem onClick={() => onEdit(t)}>
+   532→                            <Pencil className="h-4 w-4" />
+   533→                            Editar
+   534→                          </DropdownMenuItem>
+   535→                          <DropdownMenuItem
+   536→                            variant="destructive"
+   537→                            onClick={() => onDelete(t)}
+   538→                          >
+   539→                            <Trash2 className="h-4 w-4" />
+   540→                            Excluir
+   541→                          </DropdownMenuItem>
+   542→                        </DropdownMenuContent>
+   543→                      </DropdownMenu>
+   544→                    </TableCell>
+   545→                  </TableRow>
+   546→                );
+   547→              })}
+   548→            </TableBody>
+   549→          </Table>
+   550→        </div>
+   551→      </CardContent>
+   552→    </Card>
+   553→  );
+   554→}
+   555→
+   556→// ---------------- Transaction form dialog ----------------
+   557→
+   558→interface FormState {
+   559→  type: TransactionType;
+   560→  amount: string;
+   561→  description: string;
+   562→  date: string;
+   563→  accountId: string;
+   564→  categoryId: string;
+   565→  transferToAccountId: string;
+   566→}
+   567→
+   568→const EMPTY_FORM: FormState = {
+   569→  type: "expense",
+   570→  amount: "",
+   571→  description: "",
+   572→  date: todayISODate(),
+   573→  accountId: "",
+   574→  categoryId: "",
+   575→  transferToAccountId: "",
+   576→};
+   577→
+   578→function TransactionFormDialog({
+   579→  open,
+   580→  onOpenChange,
+   581→  editing,
+   582→  accounts,
+   583→  categories,
+   584→}: {
+   585→  open: boolean;
+   586→  onOpenChange: (open: boolean) => void;
+   587→  editing: Transaction | null;
+   588→  accounts: Account[];
+   589→  categories: Category[];
+   590→}) {
+   591→  const queryClient = useQueryClient();
+   592→  const [form, setForm] = useState<FormState>(() => {
+   593→    if (editing) {
+   594→      return {
+   595→        type: editing.type,
+   596→        amount: String(editing.amount ?? ""),
+   597→        description: editing.description,
+   598→        date: isoDateToLocalInput(editing.date),
+   599→        accountId: editing.accountId,
+   600→        categoryId: editing.categoryId ?? "",
+   601→        transferToAccountId: editing.transferToAccountId ?? "",
+   602→      };
+   603→    }
+   604→    return {
+   605→      ...EMPTY_FORM,
+   606→      accountId: accounts[0]?.id ?? "",
+   607→      date: todayISODate(),
+   608→    };
+   609→  });
+   610→
+   611→  // In create mode, default the account when accounts are already loaded
+   612→  // at mount time (handled by the lazy initializer above). The dialog is
+   613→  // remounted on each open via `key={formSession}` so this is fresh.
+   614→  const isTransfer = form.type === "transfer";
+   615→
+   616→  const filteredCategories = useMemo(() => {
+   617→    if (isTransfer) return [];
+   618→    return categories.filter((c) => c.type === form.type);
+   619→  }, [categories, form.type, isTransfer]);
+   620→
+   621→  const availableDestAccounts = useMemo(
+   622→    () => accounts.filter((a) => a.id !== form.accountId),
+   623→    [accounts, form.accountId]
+   624→  );
+   625→
+   626→  const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+   627→    setForm((prev) => ({ ...prev, [key]: value }));
+   628→
+   629→  const handleTypeChange = (next: TransactionType) => {
+   630→    setForm((prev) => ({
+   631→      ...prev,
+   632→      type: next,
+   633→      // categories are type-specific, reset to avoid mismatches
+   634→      categoryId: "",
+   635→      transferToAccountId:
+   636→        next === "transfer" ? prev.transferToAccountId : "",
+   637→    }));
+   638→  };
+   639→
+   640→  const handleAccountChange = (id: string) => {
+   641→    setForm((prev) => ({
+   642→      ...prev,
+   643→      accountId: id,
+   644→      transferToAccountId:
+   645→        prev.transferToAccountId === id ? "" : prev.transferToAccountId,
+   646→    }));
+   647→  };
+   648→
+   649→  const mutation = useMutation({
+   650→    mutationFn: async () => {
+   651→      const amountNum = parseFloat(form.amount);
+   652→      if (!form.amount || isNaN(amountNum) || amountNum <= 0) {
+   653→        throw new Error("Informe um valor válido maior que zero.");
+   654→      }
+   655→      if (!form.description.trim()) {
+   656→        throw new Error("Informe uma descrição.");
+   657→      }
+   658→      if (!form.accountId) {
+   659→        throw new Error("Selecione uma conta.");
+   660→      }
+   661→      if (isTransfer) {
+   662→        if (!form.transferToAccountId) {
+   663→          throw new Error("Selecione a conta de destino.");
+   664→        }
+   665→        if (form.transferToAccountId === form.accountId) {
+   666→          throw new Error("A conta de destino deve ser diferente da origem.");
+   667→        }
+   668→      }
+   669→      const body = {
+   670→        type: form.type,
+   671→        amount: form.amount,
+   672→        description: form.description.trim(),
+   673→        date: new Date(form.date).toISOString(),
+   674→        accountId: form.accountId,
+   675→        categoryId:
+   676→          isTransfer || !form.categoryId ? null : form.categoryId,
+   677→        transferToAccountId: isTransfer ? form.transferToAccountId : null,
+   678→      };
+   679→      const url = editing
+   680→        ? `/api/finpro/transactions/${editing.id}`
+   681→        : "/api/finpro/transactions";
+   682→      const method = editing ? "PUT" : "POST";
+   683→      const res = await fetch(url, {
+   684→        method,
+   685→        headers: { "Content-Type": "application/json" },
+   686→        body: JSON.stringify(body),
+   687→      });
+   688→      const data = await res.json().catch(() => ({}));
+   689→      if (!res.ok) {
+   690→        throw new Error(data?.error ?? "Erro ao salvar transação.");
+   691→      }
+   692→      return data as Transaction;
+   693→    },
+   694→    onSuccess: () => {
+   695→      toast.success(
+   696→        editing ? "Transação atualizada!" : "Transação criada!"
+   697→      );
+   698→      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+   699→      useFinProStore.getState().triggerRefresh();
+   700→      onOpenChange(false);
+   701→    },
+   702→    onError: (err: Error) => {
+   703→      toast.error(err.message);
+   704→    },
+   705→  });
+   706→
+   707→  const handleSubmit = (e: React.FormEvent) => {
+   708→    e.preventDefault();
+   709→    mutation.mutate();
+   710→  };
+   711→
+   712→  return (
+   713→    <Dialog open={open} onOpenChange={onOpenChange}>
+   714→      <DialogContent className="sm:max-w-[520px]">
+   715→        <DialogHeader>
+   716→          <DialogTitle>
+   717→            {editing ? "Editar transação" : "Nova transação"}
+   718→          </DialogTitle>
+   719→          <DialogDescription>
+   720→            {editing
+   721→              ? "Atualize os dados da transação abaixo."
+   722→              : "Preencha os dados para registrar uma nova transação."}
+   723→          </DialogDescription>
+   724→        </DialogHeader>
+   725→        <form onSubmit={handleSubmit} className="space-y-4">
+   726→          {/* Tipo */}
+   727→          <div className="space-y-1.5">
+   728→            <Label>Tipo</Label>
+   729→            <RadioGroup
+   730→              value={form.type}
+   731→              onValueChange={(v) => handleTypeChange(v as TransactionType)}
+   732→              className="grid grid-cols-3 gap-2"
+   733→            >
+   734→              {TYPE_RADIO_OPTIONS.map((opt) => {
+   735→                const active = form.type === opt.value;
+   736→                return (
+   737→                  <Label
+   738→                    key={opt.value}
+   739→                    htmlFor={`type-${opt.value}`}
+   740→                    className={cn(
+   741→                      "flex cursor-pointer items-center justify-center gap-2 rounded-md border border-input px-3 py-2 text-sm font-medium transition-colors hover:bg-accent",
+   742→                      active && "border-primary bg-primary/5"
+   743→                    )}
+   744→                  >
+   745→                    <RadioGroupItem
+   746→                      id={`type-${opt.value}`}
+   747→                      value={opt.value}
+   748→                      className="sr-only"
+   749→                    />
+   750→                    <span className={cn(active && opt.color)}>{opt.label}</span>
+   751→                  </Label>
+   752→                );
+   753→              })}
+   754→            </RadioGroup>
+   755→          </div>
+   756→
+   757→          {/* Valor + Data */}
+   758→          <div className="grid grid-cols-2 gap-3">
+   759→            <div className="space-y-1.5">
+   760→              <Label htmlFor="amount">Valor</Label>
+   761→              <div className="relative">
+   762→                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
+   763→                  R$
+   764→                </span>
+   765→                <Input
+   766→                  id="amount"
+   767→                  type="number"
+   768→                  step="0.01"
+   769→                  min="0"
+   770→                  inputMode="decimal"
+   771→                  placeholder="0,00"
+   772→                  value={form.amount}
+   773→                  onChange={(e) => update("amount", e.target.value)}
+   774→                  className="pl-9"
+   775→                />
+   776→              </div>
+   777→            </div>
+   778→            <div className="space-y-1.5">
+   779→              <Label htmlFor="date">Data</Label>
+   780→              <Input
+   781→                id="date"
+   782→                type="date"
+   783→                value={form.date}
+   784→                onChange={(e) => update("date", e.target.value)}
+   785→                className="w-full"
+   786→              />
+   787→            </div>
+   788→          </div>
+   789→
+   790→          {/* Descrição */}
+   791→          <div className="space-y-1.5">
+   792→            <Label htmlFor="description">Descrição</Label>
+   793→            <Input
+   794→              id="description"
+   795→              type="text"
+   796→              placeholder="Ex: Aluguel, Salário, Mercado..."
+   797→              value={form.description}
+   798→              onChange={(e) => update("description", e.target.value)}
+   799→            />
+   800→          </div>
+   801→
+   802→          {/* Conta */}
+   803→          <div className="space-y-1.5">
+   804→            <Label htmlFor="account">
+   805→              {isTransfer ? "Conta de origem" : "Conta"}
+   806→            </Label>
+   807→            <Select
+   808→              value={form.accountId || undefined}
+   809→              onValueChange={handleAccountChange}
+   810→            >
+   811→              <SelectTrigger id="account" className="w-full">
+   812→                <SelectValue placeholder="Selecione uma conta" />
+   813→              </SelectTrigger>
+   814→              <SelectContent>
+   815→                {accounts.map((a) => (
+   816→                  <SelectItem key={a.id} value={a.id}>
+   817→                    {a.name}
+   818→                  </SelectItem>
+   819→                ))}
+   820→              </SelectContent>
+   821→            </Select>
+   822→          </div>
+   823→
+   824→          {/* Categoria (only income/expense) */}
+   825→          {!isTransfer && (
+   826→            <div className="space-y-1.5">
+   827→              <Label htmlFor="category">Categoria</Label>
+   828→              <Select
+   829→                value={form.categoryId || undefined}
+   830→                onValueChange={(v) => update("categoryId", v)}
+   831→              >
+   832→                <SelectTrigger id="category" className="w-full">
+   833→                  <SelectValue placeholder="Selecione uma categoria" />
+   834→                </SelectTrigger>
+   835→                <SelectContent>
+   836→                  {filteredCategories.length === 0 ? (
+   837→                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+   838→                      Nenhuma categoria disponível
+   839→                    </div>
+   840→                  ) : (
+   841→                    filteredCategories.map((c) => (
+   842→                      <SelectItem key={c.id} value={c.id}>
+   843→                        <span className="inline-flex items-center gap-2">
+   844→                          <span
+   845→                            className="h-2 w-2 rounded-full"
+   846→                            style={{ backgroundColor: c.color }}
+   847→                          />
+   848→                          {c.name}
+   849→                        </span>
+   850→                      </SelectItem>
+   851→                    ))
+   852→                  )}
+   853→                </SelectContent>
+   854→              </Select>
+   855→            </div>
+   856→          )}
+   857→
+   858→          {/* Conta de destino (only transfer) */}
+   859→          {isTransfer && (
+   860→            <div className="space-y-1.5">
+   861→              <Label htmlFor="transferTo">Conta de destino</Label>
+   862→              <Select
+   863→                value={form.transferToAccountId || undefined}
+   864→                onValueChange={(v) => update("transferToAccountId", v)}
+   865→              >
+   866→                <SelectTrigger id="transferTo" className="w-full">
+   867→                  <SelectValue placeholder="Selecione a conta de destino" />
+   868→                </SelectTrigger>
+   869→                <SelectContent>
+   870→                  {availableDestAccounts.length === 0 ? (
+   871→                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+   872→                      Nenhuma conta disponível
+   873→                    </div>
+   874→                  ) : (
+   875→                    availableDestAccounts.map((a) => (
+   876→                      <SelectItem key={a.id} value={a.id}>
+   877→                        {a.name}
+   878→                      </SelectItem>
+   879→                    ))
+   880→                  )}
+   881→                </SelectContent>
+   882→              </Select>
+   883→            </div>
+   884→          )}
+   885→
+   886→          <DialogFooter className="gap-2 pt-2">
+   887→            <Button
+   888→              type="button"
+   889→              variant="outline"
+   890→              onClick={() => onOpenChange(false)}
+   891→              disabled={mutation.isPending}
+   892→            >
+   893→              Cancelar
+   894→            </Button>
+   895→            <Button type="submit" disabled={mutation.isPending}>
+   896→              {mutation.isPending && (
+   897→                <Loader2 className="h-4 w-4 animate-spin" />
+   898→              )}
+   899→              {editing ? "Salvar alterações" : "Criar transação"}
+   900→            </Button>
+   901→          </DialogFooter>
+   902→        </form>
+   903→      </DialogContent>
+   904→    </Dialog>
+   905→  );
+   906→}
+   907→
+   908→// ---------------- Delete confirmation ----------------
+   909→
+   910→function DeleteDialog({
+   911→  transaction,
+   912→  open,
+   913→  onOpenChange,
+   914→}: {
+   915→  transaction: Transaction | null;
+   916→  open: boolean;
+   917→  onOpenChange: (open: boolean) => void;
+   918→}) {
+   919→  const queryClient = useQueryClient();
+   920→  const mutation = useMutation({
+   921→    mutationFn: async () => {
+   922→      if (!transaction) throw new Error("Transação inválida.");
+   923→      const res = await fetch(
+   924→        `/api/finpro/transactions/${transaction.id}`,
+   925→        { method: "DELETE" }
+   926→      );
+   927→      const data = await res.json().catch(() => ({}));
+   928→      if (!res.ok) {
+   929→        throw new Error(data?.error ?? "Erro ao excluir transação.");
+   930→      }
+   931→      return data;
+   932→    },
+   933→    onSuccess: () => {
+   934→      toast.success("Transação excluída!");
+   935→      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+   936→      useFinProStore.getState().triggerRefresh();
+   937→      onOpenChange(false);
+   938→    },
+   939→    onError: (err: Error) => {
+   940→      toast.error(err.message);
+   941→    },
+   942→  });
+   943→
+   944→  return (
+   945→    <AlertDialog open={open} onOpenChange={onOpenChange}>
+   946→      <AlertDialogContent>
+   947→        <AlertDialogHeader>
+   948→          <AlertDialogTitle>Excluir transação?</AlertDialogTitle>
+   949→          <AlertDialogDescription>
+   950→            {transaction
+   951→              ? `Esta ação não pode ser desfeita. A transação "${transaction.description}" será removida permanentemente.`
+   952→              : "Esta ação não pode ser desfeita."}
+   953→          </AlertDialogDescription>
+   954→        </AlertDialogHeader>
+   955→        <AlertDialogFooter>
+   956→          <AlertDialogCancel disabled={mutation.isPending}>
+   957→            Cancelar
+   958→          </AlertDialogCancel>
+   959→          <AlertDialogAction
+   960→            onClick={(e) => {
+   961→              e.preventDefault();
+   962→              mutation.mutate();
+   963→            }}
+   964→            disabled={mutation.isPending}
+   965→            className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60"
+   966→          >
+   967→            {mutation.isPending && (
+   968→              <Loader2 className="h-4 w-4 animate-spin" />
+   969→            )}
+   970→            Excluir
+   971→          </AlertDialogAction>
+   972→        </AlertDialogFooter>
+   973→      </AlertDialogContent>
+   974→    </AlertDialog>
+   975→  );
+   976→}
+   977→
+   978→// ---------------- Main view ----------------
+   979→
+   980→export function TransactionsView() {
+   981→  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+   982→  const [formOpen, setFormOpen] = useState(false);
+   983→  const [editing, setEditing] = useState<Transaction | null>(null);
+   984→  // formSession forces the dialog to remount on each open so form state
+   985→  // initializes cleanly for create/edit without stale data
+   986→  const [formSession, setFormSession] = useState(0);
+   987→  const [deleteOpen, setDeleteOpen] = useState(false);
+   988→  const [toDelete, setToDelete] = useState<Transaction | null>(null);
+   989→
+   990→  const queryParams = useMemo(() => {
+   991→    const params = new URLSearchParams();
+   992→    if (filters.type && filters.type !== "all")
+   993→      params.set("type", filters.type);
+   994→    if (filters.accountId && filters.accountId !== "all")
+   995→      params.set("accountId", filters.accountId);
+   996→    if (filters.categoryId && filters.categoryId !== "all")
+   997→      params.set("categoryId", filters.categoryId);
+   998→    if (filters.from) params.set("from", filters.from);
+   999→    if (filters.to) params.set("to", filters.to);
+  1000→    if (filters.search.trim()) params.set("search", filters.search.trim());
+  1001→    return params.toString();
+  1002→  }, [filters]);
+  1003→
+  1004→  const { data: transactions = [], isLoading: txLoading } = useQuery({
+  1005→    queryKey: ["transactions", filters],
+  1006→    queryFn: async () => {
+  1007→      const res = await fetch(`/api/finpro/transactions?${queryParams}`);
+  1008→      if (!res.ok) {
+  1009→        throw new Error("Erro ao carregar transações.");
+  1010→      }
+  1011→      return res.json() as Promise<Transaction[]>;
+  1012→    },
+  1013→  });
+  1014→
+  1015→  const { data: accounts = [] } = useQuery<Account[]>({
+  1016→    queryKey: ["accounts"],
+  1017→    queryFn: async () => {
+  1018→      const res = await fetch("/api/finpro/accounts");
+  1019→      if (!res.ok) throw new Error("Erro ao carregar contas.");
+  1020→      return res.json();
+  1021→    },
+  1022→  });
+  1023→
+  1024→  const { data: categories = [] } = useQuery<Category[]>({
+  1025→    queryKey: ["categories", "all"],
+  1026→    queryFn: async () => {
+  1027→      const res = await fetch("/api/finpro/categories");
+  1028→      if (!res.ok) throw new Error("Erro ao carregar categorias.");
+  1029→      return res.json();
+  1030→    },
+  1031→  });
+  1032→
+  1033→  const handleResetFilters = () => setFilters(DEFAULT_FILTERS);
+  1034→
+  1035→  const openCreate = () => {
+  1036→    setEditing(null);
+  1037→    setFormSession((s) => s + 1);
+  1038→    setFormOpen(true);
+  1039→  };
+  1040→
+  1041→  const openEdit = (t: Transaction) => {
+  1042→    setEditing(t);
+  1043→    setFormSession((s) => s + 1);
+  1044→    setFormOpen(true);
+  1045→  };
+  1046→
+  1047→  const openDelete = (t: Transaction) => {
+  1048→    setToDelete(t);
+  1049→    setDeleteOpen(true);
+  1050→  };
+  1051→
+  1052→  const count = transactions.length;
+  1053→
+  1054→  return (
+  1055→    <div className="space-y-5">
+  1056→      {/* Header row */}
+  1057→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  1058→        <p className="text-sm text-muted-foreground">
+  1059→          {count}{" "}
+  1060→          {count === 1 ? "transação encontrada" : "transações encontradas"}
+  1061→        </p>
+  1062→        <Button onClick={openCreate} className="w-full sm:w-auto">
+  1063→          <Plus className="h-4 w-4" />
+  1064→          Nova transação
+  1065→        </Button>
+  1066→      </div>
+  1067→
+  1068→      {/* Filters */}
+  1069→      <FilterBar
+  1070→        filters={filters}
+  1071→        setFilters={setFilters}
+  1072→        accounts={accounts}
+  1073→        categories={categories}
+  1074→        onReset={handleResetFilters}
+  1075→      />
+  1076→
+  1077→      {/* Summary */}
+  1078→      <SummaryCards transactions={transactions} />
+  1079→
+  1080→      {/* Table */}
+  1081→      <TransactionsTable
+  1082→        transactions={transactions}
+  1083→        isLoading={txLoading}
+  1084→        onEdit={openEdit}
+  1085→        onDelete={openDelete}
+  1086→      />
+  1087→
+  1088→      {/* Form dialog — remounts on each open via formSession */}
+  1089→      <TransactionFormDialog
+  1090→        key={formSession}
+  1091→        open={formOpen}
+  1092→        onOpenChange={setFormOpen}
+  1093→        editing={editing}
+  1094→        accounts={accounts}
+  1095→        categories={categories}
+  1096→      />
+  1097→
+  1098→      {/* Delete dialog */}
+  1099→      <DeleteDialog
+  1100→        transaction={toDelete}
+  1101→        open={deleteOpen}
+  1102→        onOpenChange={setDeleteOpen}
+  1103→      />
+  1104→    </div>
+  1105→  );
+  1106→}
+  1107→

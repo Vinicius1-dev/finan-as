@@ -1,0 +1,1107 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useMemo, useState } from "react";
+     4→     4→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     5→     5→import { toast } from "sonner";
+     6→     6→import {
+     7→     7→  ArrowDownRight,
+     8→     8→  ArrowLeftRight,
+     9→     9→  ArrowUpRight,
+    10→    10→  Filter,
+    11→    11→  Inbox,
+    12→    12→  Loader2,
+    13→    13→  MoreHorizontal,
+    14→    14→  Pencil,
+    15→    15→  Plus,
+    16→    16→  Search,
+    17→    17→  Trash2,
+    18→    18→  X,
+    19→    19→} from "lucide-react";
+    20→    20→import type {
+    21→    21→  Account,
+    22→    22→  Category,
+    23→    23→  Transaction,
+    24→    24→  TransactionType,
+    25→    25→} from "@/lib/types";
+    26→    26→import { formatCurrency, formatDate } from "@/lib/format";
+    27→    27→import { cn } from "@/lib/utils";
+    28→    28→import { useFinProStore } from "@/store/finpro-store";
+    29→    29→import { Card, CardContent } from "@/components/ui/card";
+    30→    30→import { Button } from "@/components/ui/button";
+    31→    31→import { Input } from "@/components/ui/input";
+    32→    32→import { Label } from "@/components/ui/label";
+    33→    33→import { Badge } from "@/components/ui/badge";
+    34→    34→import {
+    35→    35→  Select,
+    36→    36→  SelectContent,
+    37→    37→  SelectItem,
+    38→    38→  SelectTrigger,
+    39→    39→  SelectValue,
+    40→    40→} from "@/components/ui/select";
+    41→    41→import {
+    42→    42→  Dialog,
+    43→    43→  DialogContent,
+    44→    44→  DialogDescription,
+    45→    45→  DialogFooter,
+    46→    46→  DialogHeader,
+    47→    47→  DialogTitle,
+    48→    48→} from "@/components/ui/dialog";
+    49→    49→import {
+    50→    50→  AlertDialog,
+    51→    51→  AlertDialogAction,
+    52→    52→  AlertDialogCancel,
+    53→    53→  AlertDialogContent,
+    54→    54→  AlertDialogDescription,
+    55→    55→  AlertDialogFooter,
+    56→    56→  AlertDialogHeader,
+    57→    57→  AlertDialogTitle,
+    58→    58→} from "@/components/ui/alert-dialog";
+    59→    59→import {
+    60→    60→  DropdownMenu,
+    61→    61→  DropdownMenuContent,
+    62→    62→  DropdownMenuItem,
+    63→    63→  DropdownMenuTrigger,
+    64→    64→} from "@/components/ui/dropdown-menu";
+    65→    65→import {
+    66→    66→  Table,
+    67→    67→  TableBody,
+    68→    68→  TableCell,
+    69→    69→  TableHead,
+    70→    70→  TableHeader,
+    71→    71→  TableRow,
+    72→    72→} from "@/components/ui/table";
+    73→    73→import { Skeleton } from "@/components/ui/skeleton";
+    74→    74→import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+    75→    75→import { EmptyState } from "@/components/finpro/shared/empty-state";
+    76→    76→
+    77→    77→// ---------------- helpers ----------------
+    78→    78→
+    79→    79→const TYPE_OPTIONS: { value: string; label: string }[] = [
+    80→    80→  { value: "all", label: "Todos" },
+    81→    81→  { value: "income", label: "Receitas" },
+    82→    82→  { value: "expense", label: "Despesas" },
+    83→    83→  { value: "transfer", label: "Transferências" },
+    84→    84→];
+    85→    85→
+    86→    86→const TYPE_LABELS: Record<TransactionType, string> = {
+    87→    87→  income: "Receita",
+    88→    88→  expense: "Despesa",
+    89→    89→  transfer: "Transferência",
+    90→    90→};
+    91→    91→
+    92→    92→const TYPE_RADIO_OPTIONS: {
+    93→    93→  value: TransactionType;
+    94→    94→  label: string;
+    95→    95→  color: string;
+    96→    96→}[] = [
+    97→    97→  {
+    98→    98→    value: "income",
+    99→    99→    label: "Receita",
+   100→   100→    color: "text-emerald-600 dark:text-emerald-400",
+   101→   101→  },
+   102→   102→  {
+   103→   103→    value: "expense",
+   104→   104→    label: "Despesa",
+   105→   105→    color: "text-rose-600 dark:text-rose-400",
+   106→   106→  },
+   107→   107→  {
+   108→   108→    value: "transfer",
+   109→   109→    label: "Transferência",
+   110→   110→    color: "text-blue-600 dark:text-blue-400",
+   111→   111→  },
+   112→   112→];
+   113→   113→
+   114→   114→function todayISODate(): string {
+   115→   115→  const d = new Date();
+   116→   116→  const y = d.getFullYear();
+   117→   117→  const m = String(d.getMonth() + 1).padStart(2, "0");
+   118→   118→  const day = String(d.getDate()).padStart(2, "0");
+   119→   119→  return `${y}-${m}-${day}`;
+   120→   120→}
+   121→   121→
+   122→   122→function isoDateToLocalInput(iso: string): string {
+   123→   123→  if (!iso) return todayISODate();
+   124→   124→  const d = new Date(iso);
+   125→   125→  if (isNaN(d.getTime())) return todayISODate();
+   126→   126→  const y = d.getFullYear();
+   127→   127→  const m = String(d.getMonth() + 1).padStart(2, "0");
+   128→   128→  const day = String(d.getDate()).padStart(2, "0");
+   129→   129→  return `${y}-${m}-${day}`;
+   130→   130→}
+   131→   131→
+   132→   132→// ---------------- Type badge ----------------
+   133→   133→
+   134→   134→function TypeBadge({ type }: { type: TransactionType }) {
+   135→   135→  const cls =
+   136→   136→    type === "income"
+   137→   137→      ? "border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+   138→   138→      : type === "expense"
+   139→   139→      ? "border-transparent bg-rose-500/15 text-rose-700 dark:text-rose-300"
+   140→   140→      : "border-transparent bg-blue-500/15 text-blue-700 dark:text-blue-300";
+   141→   141→  return <Badge className={cls}>{TYPE_LABELS[type]}</Badge>;
+   142→   142→}
+   143→   143→
+   144→   144→// ---------------- Amount cell ----------------
+   145→   145→
+   146→   146→function AmountCell({ transaction }: { transaction: Transaction }) {
+   147→   147→  const isIncome = transaction.type === "income";
+   148→   148→  const isTransfer = transaction.type === "transfer";
+   149→   149→  return (
+   150→   150→    <span
+   151→   151→      className={cn(
+   152→   152→        "font-semibold tabular-nums",
+   153→   153→        isIncome
+   154→   154→          ? "text-emerald-600 dark:text-emerald-400"
+   155→   155→          : isTransfer
+   156→   156→          ? "text-blue-600 dark:text-blue-400"
+   157→   157→          : "text-foreground"
+   158→   158→      )}
+   159→   159→    >
+   160→   160→      {isIncome ? "+" : isTransfer ? "" : "-"}
+   161→   161→      {formatCurrency(transaction.amount)}
+   162→   162→    </span>
+   163→   163→  );
+   164→   164→}
+   165→   165→
+   166→   166→// ---------------- Summary cards ----------------
+   167→   167→
+   168→   168→function SummaryCards({ transactions }: { transactions: Transaction[] }) {
+   169→   169→  const totals = useMemo(() => {
+   170→   170→    let income = 0;
+   171→   171→    let expense = 0;
+   172→   172→    for (const t of transactions) {
+   173→   173→      if (t.type === "income") income += t.amount;
+   174→   174→      else if (t.type === "expense") expense += t.amount;
+   175→   175→    }
+   176→   176→    return { income, expense, balance: income - expense };
+   177→   177→  }, [transactions]);
+   178→   178→
+   179→   179→  const cards = [
+   180→   180→    {
+   181→   181→      label: "Receitas totais",
+   182→   182→      value: totals.income,
+   183→   183→      color: "text-emerald-600 dark:text-emerald-400",
+   184→   184→      bg: "bg-emerald-500/10",
+   185→   185→      Icon: ArrowDownRight,
+   186→   186→    },
+   187→   187→    {
+   188→   188→      label: "Despesas totais",
+   189→   189→      value: totals.expense,
+   190→   190→      color: "text-rose-600 dark:text-rose-400",
+   191→   191→      bg: "bg-rose-500/10",
+   192→   192→      Icon: ArrowUpRight,
+   193→   193→    },
+   194→   194→    {
+   195→   195→      label: "Saldo",
+   196→   196→      value: totals.balance,
+   197→   197→      color: "text-primary",
+   198→   198→      bg: "bg-primary/10",
+   199→   199→      Icon: ArrowLeftRight,
+   200→   200→    },
+   201→   201→  ];
+   202→   202→
+   203→   203→  return (
+   204→   204→    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   205→   205→      {cards.map(({ label, value, color, bg, Icon }) => (
+   206→   206→        <Card key={label} className="py-0">
+   207→   207→          <CardContent className="flex items-center gap-4 p-4">
+   208→   208→            <div
+   209→   209→              className={cn(
+   210→   210→                "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+   211→   211→                bg,
+   212→   212→                color
+   213→   213→              )}
+   214→   214→            >
+   215→   215→              <Icon className="h-5 w-5" />
+   216→   216→            </div>
+   217→   217→            <div className="min-w-0">
+   218→   218→              <p className="truncate text-xs font-medium text-muted-foreground">
+   219→   219→                {label}
+   220→   220→              </p>
+   221→   221→              <p
+   222→   222→                className={cn(
+   223→   223→                  "truncate text-lg font-bold tabular-nums",
+   224→   224→                  color
+   225→   225→                )}
+   226→   226→              >
+   227→   227→                {formatCurrency(value)}
+   228→   228→              </p>
+   229→   229→            </div>
+   230→   230→          </CardContent>
+   231→   231→        </Card>
+   232→   232→      ))}
+   233→   233→    </div>
+   234→   234→  );
+   235→   235→}
+   236→   236→
+   237→   237→// ---------------- Filter bar ----------------
+   238→   238→
+   239→   239→interface Filters {
+   240→   240→  type: string;
+   241→   241→  accountId: string;
+   242→   242→  categoryId: string;
+   243→   243→  from: string;
+   244→   244→  to: string;
+   245→   245→  search: string;
+   246→   246→}
+   247→   247→
+   248→   248→const DEFAULT_FILTERS: Filters = {
+   249→   249→  type: "all",
+   250→   250→  accountId: "all",
+   251→   251→  categoryId: "all",
+   252→   252→  from: "",
+   253→   253→  to: "",
+   254→   254→  search: "",
+   255→   255→};
+   256→   256→
+   257→   257→function FilterBar({
+   258→   258→  filters,
+   259→   259→  setFilters,
+   260→   260→  accounts,
+   261→   261→  categories,
+   262→   262→  onReset,
+   263→   263→}: {
+   264→   264→  filters: Filters;
+   265→   265→  setFilters: (f: Filters) => void;
+   266→   266→  accounts: Account[];
+   267→   267→  categories: Category[];
+   268→   268→  onReset: () => void;
+   269→   269→}) {
+   270→   270→  const update = <K extends keyof Filters>(key: K, value: Filters[K]) =>
+   271→   271→    setFilters({ ...filters, [key]: value });
+   272→   272→
+   273→   273→  const hasActive =
+   274→   274→    filters.type !== "all" ||
+   275→   275→    filters.accountId !== "all" ||
+   276→   276→    filters.categoryId !== "all" ||
+   277→   277→    filters.from !== "" ||
+   278→   278→    filters.to !== "" ||
+   279→   279→    filters.search.trim() !== "";
+   280→   280→
+   281→   281→  return (
+   282→   282→    <Card className="py-0">
+   283→   283→      <CardContent className="p-4 sm:p-5">
+   284→   284→        <div className="mb-4 flex items-center justify-between">
+   285→   285→          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+   286→   286→            <Filter className="h-4 w-4" />
+   287→   287→            Filtros
+   288→   288→          </div>
+   289→   289→          <Button
+   290→   290→            variant="ghost"
+   291→   291→            size="sm"
+   292→   292→            className="h-8 text-muted-foreground hover:text-foreground"
+   293→   293→            onClick={onReset}
+   294→   294→            disabled={!hasActive}
+   295→   295→          >
+   296→   296→            <X className="h-4 w-4" />
+   297→   297→            Limpar filtros
+   298→   298→          </Button>
+   299→   299→        </div>
+   300→   300→        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+   301→   301→          {/* Tipo */}
+   302→   302→          <div className="space-y-1.5">
+   303→   303→            <Label className="text-xs text-muted-foreground">Tipo</Label>
+   304→   304→            <Select
+   305→   305→              value={filters.type}
+   306→   306→              onValueChange={(v) => update("type", v)}
+   307→   307→            >
+   308→   308→              <SelectTrigger className="w-full">
+   309→   309→                <SelectValue placeholder="Tipo" />
+   310→   310→              </SelectTrigger>
+   311→   311→              <SelectContent>
+   312→   312→                {TYPE_OPTIONS.map((opt) => (
+   313→   313→                  <SelectItem key={opt.value} value={opt.value}>
+   314→   314→                    {opt.label}
+   315→   315→                  </SelectItem>
+   316→   316→                ))}
+   317→   317→              </SelectContent>
+   318→   318→            </Select>
+   319→   319→          </div>
+   320→   320→
+   321→   321→          {/* Conta */}
+   322→   322→          <div className="space-y-1.5">
+   323→   323→            <Label className="text-xs text-muted-foreground">Conta</Label>
+   324→   324→            <Select
+   325→   325→              value={filters.accountId}
+   326→   326→              onValueChange={(v) => update("accountId", v)}
+   327→   327→            >
+   328→   328→              <SelectTrigger className="w-full">
+   329→   329→                <SelectValue placeholder="Conta" />
+   330→   330→              </SelectTrigger>
+   331→   331→              <SelectContent>
+   332→   332→                <SelectItem value="all">Todas</SelectItem>
+   333→   333→                {accounts.map((a) => (
+   334→   334→                  <SelectItem key={a.id} value={a.id}>
+   335→   335→                    {a.name}
+   336→   336→                  </SelectItem>
+   337→   337→                ))}
+   338→   338→              </SelectContent>
+   339→   339→            </Select>
+   340→   340→          </div>
+   341→   341→
+   342→   342→          {/* Categoria */}
+   343→   343→          <div className="space-y-1.5">
+   344→   344→            <Label className="text-xs text-muted-foreground">Categoria</Label>
+   345→   345→            <Select
+   346→   346→              value={filters.categoryId}
+   347→   347→              onValueChange={(v) => update("categoryId", v)}
+   348→   348→            >
+   349→   349→              <SelectTrigger className="w-full">
+   350→   350→                <SelectValue placeholder="Categoria" />
+   351→   351→              </SelectTrigger>
+   352→   352→              <SelectContent>
+   353→   353→                <SelectItem value="all">Todas</SelectItem>
+   354→   354→                {categories.map((c) => (
+   355→   355→                  <SelectItem key={c.id} value={c.id}>
+   356→   356→                    <span className="inline-flex items-center gap-2">
+   357→   357→                      <span
+   358→   358→                        className="h-2 w-2 rounded-full"
+   359→   359→                        style={{ backgroundColor: c.color }}
+   360→   360→                      />
+   361→   361→                      {c.name}
+   362→   362→                    </span>
+   363→   363→                  </SelectItem>
+   364→   364→                ))}
+   365→   365→              </SelectContent>
+   366→   366→            </Select>
+   367→   367→          </div>
+   368→   368→
+   369→   369→          {/* Busca */}
+   370→   370→          <div className="space-y-1.5">
+   371→   371→            <Label className="text-xs text-muted-foreground">Busca</Label>
+   372→   372→            <div className="relative">
+   373→   373→              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   374→   374→              <Input
+   375→   375→                type="text"
+   376→   376→                placeholder="Descrição..."
+   377→   377→                value={filters.search}
+   378→   378→                onChange={(e) => update("search", e.target.value)}
+   379→   379→                className="pl-8"
+   380→   380→              />
+   381→   381→            </div>
+   382→   382→          </div>
+   383→   383→
+   384→   384→          {/* De */}
+   385→   385→          <div className="space-y-1.5">
+   386→   386→            <Label className="text-xs text-muted-foreground">De</Label>
+   387→   387→            <Input
+   388→   388→              type="date"
+   389→   389→              value={filters.from}
+   390→   390→              onChange={(e) => update("from", e.target.value)}
+   391→   391→              className="w-full"
+   392→   392→            />
+   393→   393→          </div>
+   394→   394→
+   395→   395→          {/* Até */}
+   396→   396→          <div className="space-y-1.5">
+   397→   397→            <Label className="text-xs text-muted-foreground">Até</Label>
+   398→   398→            <Input
+   399→   399→              type="date"
+   400→   400→              value={filters.to}
+   401→   401→              onChange={(e) => update("to", e.target.value)}
+   402→   402→              className="w-full"
+   403→   403→            />
+   404→   404→          </div>
+   405→   405→        </div>
+   406→   406→      </CardContent>
+   407→   407→    </Card>
+   408→   408→  );
+   409→   409→}
+   410→   410→
+   411→   411→// ---------------- Transactions table ----------------
+   412→   412→
+   413→   413→function TransactionsTable({
+   414→   414→  transactions,
+   415→   415→  isLoading,
+   416→   416→  onEdit,
+   417→   417→  onDelete,
+   418→   418→}: {
+   419→   419→  transactions: Transaction[];
+   420→   420→  isLoading: boolean;
+   421→   421→  onEdit: (t: Transaction) => void;
+   422→   422→  onDelete: (t: Transaction) => void;
+   423→   423→}) {
+   424→   424→  if (isLoading) {
+   425→   425→    return (
+   426→   426→      <Card className="py-0">
+   427→   427→        <CardContent className="p-0">
+   428→   428→          <div className="divide-y divide-border">
+   429→   429→            {Array.from({ length: 6 }).map((_, i) => (
+   430→   430→              <div key={i} className="flex items-center gap-3 px-4 py-3">
+   431→   431→                <Skeleton className="h-4 w-20" />
+   432→   432→                <Skeleton className="h-4 max-w-[220px] flex-1" />
+   433→   433→                <Skeleton className="h-4 w-24" />
+   434→   434→                <Skeleton className="h-4 w-24" />
+   435→   435→                <Skeleton className="h-5 w-16 rounded-full" />
+   436→   436→                <Skeleton className="ml-auto h-4 w-24" />
+   437→   437→                <Skeleton className="h-8 w-8 rounded-md" />
+   438→   438→              </div>
+   439→   439→            ))}
+   440→   440→          </div>
+   441→   441→        </CardContent>
+   442→   442→      </Card>
+   443→   443→    );
+   444→   444→  }
+   445→   445→
+   446→   446→  if (transactions.length === 0) {
+   447→   447→    return (
+   448→   448→      <Card className="py-0">
+   449→   449→        <CardContent className="p-0">
+   450→   450→          <EmptyState
+   451→   451→            icon={Inbox}
+   452→   452→            title="Nenhuma transação encontrada"
+   453→   453→            description="Tente ajustar ou limpar os filtros para ver mais resultados."
+   454→   454→          />
+   455→   455→        </CardContent>
+   456→   456→      </Card>
+   457→   457→    );
+   458→   458→  }
+   459→   459→
+   460→   460→  return (
+   461→   461→    <Card className="overflow-hidden py-0">
+   462→   462→      <CardContent className="p-0">
+   463→   463→        <div className="scrollbar-thin max-h-[60vh] overflow-auto">
+   464→   464→          <Table>
+   465→   465→            <TableHeader className="sticky top-0 z-10 bg-card [&_tr]:border-b">
+   466→   466→              <TableRow>
+   467→   467→                <TableHead className="pl-4">Data</TableHead>
+   468→   468→                <TableHead>Descrição</TableHead>
+   469→   469→                <TableHead>Categoria</TableHead>
+   470→   470→                <TableHead>Conta</TableHead>
+   471→   471→                <TableHead>Tipo</TableHead>
+   472→   472→                <TableHead className="text-right">Valor</TableHead>
+   473→   473→                <TableHead className="pr-4 text-right">Ações</TableHead>
+   474→   474→              </TableRow>
+   475→   475→            </TableHeader>
+   476→   476→            <TableBody>
+   477→   477→              {transactions.map((t) => {
+   478→   478→                const cat = t.category;
+   479→   479→                const isTransfer = t.type === "transfer";
+   480→   480→                return (
+   481→   481→                  <TableRow key={t.id} className="hover:bg-muted/40">
+   482→   482→                    <TableCell className="whitespace-nowrap pl-4 text-sm text-muted-foreground">
+   483→   483→                      {formatDate(t.date)}
+   484→   484→                    </TableCell>
+   485→   485→                    <TableCell className="max-w-[260px] truncate font-medium">
+   486→   486→                      {t.description}
+   487→   487→                    </TableCell>
+   488→   488→                    <TableCell>
+   489→   489→                      {cat ? (
+   490→   490→                        <span className="inline-flex items-center gap-2 text-sm">
+   491→   491→                          <span
+   492→   492→                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+   493→   493→                            style={{ backgroundColor: cat.color }}
+   494→   494→                          />
+   495→   495→                          <span className="truncate">{cat.name}</span>
+   496→   496→                        </span>
+   497→   497→                      ) : (
+   498→   498→                        <span className="text-muted-foreground">—</span>
+   499→   499→                      )}
+   500→   500→                    </TableCell>
+   501→   501→                    <TableCell className="text-sm">
+   502→   502→                      {isTransfer && t.transferTo ? (
+   503→   503→                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+   504→   504→                          <span className="truncate">{t.account?.name}</span>
+   505→   505→                          <ArrowLeftRight className="h-3 w-3 shrink-0" />
+   506→   506→                          <span className="truncate">{t.transferTo.name}</span>
+   507→   507→                        </span>
+   508→   508→                      ) : (
+   509→   509→                        <span>{t.account?.name ?? "—"}</span>
+   510→   510→                      )}
+   511→   511→                    </TableCell>
+   512→   512→                    <TableCell>
+   513→   513→                      <TypeBadge type={t.type} />
+   514→   514→                    </TableCell>
+   515→   515→                    <TableCell className="text-right">
+   516→   516→                      <AmountCell transaction={t} />
+   517→   517→                    </TableCell>
+   518→   518→                    <TableCell className="pr-4 text-right">
+   519→   519→                      <DropdownMenu>
+   520→   520→                        <DropdownMenuTrigger asChild>
+   521→   521→                          <Button
+   522→   522→                            variant="ghost"
+   523→   523→                            size="icon"
+   524→   524→                            className="h-8 w-8"
+   525→   525→                            aria-label="Ações da transação"
+   526→   526→                          >
+   527→   527→                            <MoreHorizontal className="h-4 w-4" />
+   528→   528→                          </Button>
+   529→   529→                        </DropdownMenuTrigger>
+   530→   530→                        <DropdownMenuContent align="end">
+   531→   531→                          <DropdownMenuItem onClick={() => onEdit(t)}>
+   532→   532→                            <Pencil className="h-4 w-4" />
+   533→   533→                            Editar
+   534→   534→                          </DropdownMenuItem>
+   535→   535→                          <DropdownMenuItem
+   536→   536→                            variant="destructive"
+   537→   537→                            onClick={() => onDelete(t)}
+   538→   538→                          >
+   539→   539→                            <Trash2 className="h-4 w-4" />
+   540→   540→                            Excluir
+   541→   541→                          </DropdownMenuItem>
+   542→   542→                        </DropdownMenuContent>
+   543→   543→                      </DropdownMenu>
+   544→   544→                    </TableCell>
+   545→   545→                  </TableRow>
+   546→   546→                );
+   547→   547→              })}
+   548→   548→            </TableBody>
+   549→   549→          </Table>
+   550→   550→        </div>
+   551→   551→      </CardContent>
+   552→   552→    </Card>
+   553→   553→  );
+   554→   554→}
+   555→   555→
+   556→   556→// ---------------- Transaction form dialog ----------------
+   557→   557→
+   558→   558→interface FormState {
+   559→   559→  type: TransactionType;
+   560→   560→  amount: string;
+   561→   561→  description: string;
+   562→   562→  date: string;
+   563→   563→  accountId: string;
+   564→   564→  categoryId: string;
+   565→   565→  transferToAccountId: string;
+   566→   566→}
+   567→   567→
+   568→   568→const EMPTY_FORM: FormState = {
+   569→   569→  type: "expense",
+   570→   570→  amount: "",
+   571→   571→  description: "",
+   572→   572→  date: todayISODate(),
+   573→   573→  accountId: "",
+   574→   574→  categoryId: "",
+   575→   575→  transferToAccountId: "",
+   576→   576→};
+   577→   577→
+   578→   578→function TransactionFormDialog({
+   579→   579→  open,
+   580→   580→  onOpenChange,
+   581→   581→  editing,
+   582→   582→  accounts,
+   583→   583→  categories,
+   584→   584→}: {
+   585→   585→  open: boolean;
+   586→   586→  onOpenChange: (open: boolean) => void;
+   587→   587→  editing: Transaction | null;
+   588→   588→  accounts: Account[];
+   589→   589→  categories: Category[];
+   590→   590→}) {
+   591→   591→  const queryClient = useQueryClient();
+   592→   592→  const [form, setForm] = useState<FormState>(() => {
+   593→   593→    if (editing) {
+   594→   594→      return {
+   595→   595→        type: editing.type,
+   596→   596→        amount: String(editing.amount ?? ""),
+   597→   597→        description: editing.description,
+   598→   598→        date: isoDateToLocalInput(editing.date),
+   599→   599→        accountId: editing.accountId,
+   600→   600→        categoryId: editing.categoryId ?? "",
+   601→   601→        transferToAccountId: editing.transferToAccountId ?? "",
+   602→   602→      };
+   603→   603→    }
+   604→   604→    return {
+   605→   605→      ...EMPTY_FORM,
+   606→   606→      accountId: accounts[0]?.id ?? "",
+   607→   607→      date: todayISODate(),
+   608→   608→    };
+   609→   609→  });
+   610→   610→
+   611→   611→  // In create mode, default the account when accounts are already loaded
+   612→   612→  // at mount time (handled by the lazy initializer above). The dialog is
+   613→   613→  // remounted on each open via `key={formSession}` so this is fresh.
+   614→   614→  const isTransfer = form.type === "transfer";
+   615→   615→
+   616→   616→  const filteredCategories = useMemo(() => {
+   617→   617→    if (isTransfer) return [];
+   618→   618→    return categories.filter((c) => c.type === form.type);
+   619→   619→  }, [categories, form.type, isTransfer]);
+   620→   620→
+   621→   621→  const availableDestAccounts = useMemo(
+   622→   622→    () => accounts.filter((a) => a.id !== form.accountId),
+   623→   623→    [accounts, form.accountId]
+   624→   624→  );
+   625→   625→
+   626→   626→  const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+   627→   627→    setForm((prev) => ({ ...prev, [key]: value }));
+   628→   628→
+   629→   629→  const handleTypeChange = (next: TransactionType) => {
+   630→   630→    setForm((prev) => ({
+   631→   631→      ...prev,
+   632→   632→      type: next,
+   633→   633→      // categories are type-specific, reset to avoid mismatches
+   634→   634→      categoryId: "",
+   635→   635→      transferToAccountId:
+   636→   636→        next === "transfer" ? prev.transferToAccountId : "",
+   637→   637→    }));
+   638→   638→  };
+   639→   639→
+   640→   640→  const handleAccountChange = (id: string) => {
+   641→   641→    setForm((prev) => ({
+   642→   642→      ...prev,
+   643→   643→      accountId: id,
+   644→   644→      transferToAccountId:
+   645→   645→        prev.transferToAccountId === id ? "" : prev.transferToAccountId,
+   646→   646→    }));
+   647→   647→  };
+   648→   648→
+   649→   649→  const mutation = useMutation({
+   650→   650→    mutationFn: async () => {
+   651→   651→      const amountNum = parseFloat(form.amount);
+   652→   652→      if (!form.amount || isNaN(amountNum) || amountNum <= 0) {
+   653→   653→        throw new Error("Informe um valor válido maior que zero.");
+   654→   654→      }
+   655→   655→      if (!form.description.trim()) {
+   656→   656→        throw new Error("Informe uma descrição.");
+   657→   657→      }
+   658→   658→      if (!form.accountId) {
+   659→   659→        throw new Error("Selecione uma conta.");
+   660→   660→      }
+   661→   661→      if (isTransfer) {
+   662→   662→        if (!form.transferToAccountId) {
+   663→   663→          throw new Error("Selecione a conta de destino.");
+   664→   664→        }
+   665→   665→        if (form.transferToAccountId === form.accountId) {
+   666→   666→          throw new Error("A conta de destino deve ser diferente da origem.");
+   667→   667→        }
+   668→   668→      }
+   669→   669→      const body = {
+   670→   670→        type: form.type,
+   671→   671→        amount: form.amount,
+   672→   672→        description: form.description.trim(),
+   673→   673→        date: new Date(form.date).toISOString(),
+   674→   674→        accountId: form.accountId,
+   675→   675→        categoryId:
+   676→   676→          isTransfer || !form.categoryId ? null : form.categoryId,
+   677→   677→        transferToAccountId: isTransfer ? form.transferToAccountId : null,
+   678→   678→      };
+   679→   679→      const url = editing
+   680→   680→        ? `/api/finpro/transactions/${editing.id}`
+   681→   681→        : "/api/finpro/transactions";
+   682→   682→      const method = editing ? "PUT" : "POST";
+   683→   683→      const res = await fetch(url, {
+   684→   684→        method,
+   685→   685→        headers: { "Content-Type": "application/json" },
+   686→   686→        body: JSON.stringify(body),
+   687→   687→      });
+   688→   688→      const data = await res.json().catch(() => ({}));
+   689→   689→      if (!res.ok) {
+   690→   690→        throw new Error(data?.error ?? "Erro ao salvar transação.");
+   691→   691→      }
+   692→   692→      return data as Transaction;
+   693→   693→    },
+   694→   694→    onSuccess: () => {
+   695→   695→      toast.success(
+   696→   696→        editing ? "Transação atualizada!" : "Transação criada!"
+   697→   697→      );
+   698→   698→      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+   699→   699→      useFinProStore.getState().triggerRefresh();
+   700→   700→      onOpenChange(false);
+   701→   701→    },
+   702→   702→    onError: (err: Error) => {
+   703→   703→      toast.error(err.message);
+   704→   704→    },
+   705→   705→  });
+   706→   706→
+   707→   707→  const handleSubmit = (e: React.FormEvent) => {
+   708→   708→    e.preventDefault();
+   709→   709→    mutation.mutate();
+   710→   710→  };
+   711→   711→
+   712→   712→  return (
+   713→   713→    <Dialog open={open} onOpenChange={onOpenChange}>
+   714→   714→      <DialogContent className="sm:max-w-[520px]">
+   715→   715→        <DialogHeader>
+   716→   716→          <DialogTitle>
+   717→   717→            {editing ? "Editar transação" : "Nova transação"}
+   718→   718→          </DialogTitle>
+   719→   719→          <DialogDescription>
+   720→   720→            {editing
+   721→   721→              ? "Atualize os dados da transação abaixo."
+   722→   722→              : "Preencha os dados para registrar uma nova transação."}
+   723→   723→          </DialogDescription>
+   724→   724→        </DialogHeader>
+   725→   725→        <form onSubmit={handleSubmit} className="space-y-4">
+   726→   726→          {/* Tipo */}
+   727→   727→          <div className="space-y-1.5">
+   728→   728→            <Label>Tipo</Label>
+   729→   729→            <RadioGroup
+   730→   730→              value={form.type}
+   731→   731→              onValueChange={(v) => handleTypeChange(v as TransactionType)}
+   732→   732→              className="grid grid-cols-3 gap-2"
+   733→   733→            >
+   734→   734→              {TYPE_RADIO_OPTIONS.map((opt) => {
+   735→   735→                const active = form.type === opt.value;
+   736→   736→                return (
+   737→   737→                  <Label
+   738→   738→                    key={opt.value}
+   739→   739→                    htmlFor={`type-${opt.value}`}
+   740→   740→                    className={cn(
+   741→   741→                      "flex cursor-pointer items-center justify-center gap-2 rounded-md border border-input px-3 py-2 text-sm font-medium transition-colors hover:bg-accent",
+   742→   742→                      active && "border-primary bg-primary/5"
+   743→   743→                    )}
+   744→   744→                  >
+   745→   745→                    <RadioGroupItem
+   746→   746→                      id={`type-${opt.value}`}
+   747→   747→                      value={opt.value}
+   748→   748→                      className="sr-only"
+   749→   749→                    />
+   750→   750→                    <span className={cn(active && opt.color)}>{opt.label}</span>
+   751→   751→                  </Label>
+   752→   752→                );
+   753→   753→              })}
+   754→   754→            </RadioGroup>
+   755→   755→          </div>
+   756→   756→
+   757→   757→          {/* Valor + Data */}
+   758→   758→          <div className="grid grid-cols-2 gap-3">
+   759→   759→            <div className="space-y-1.5">
+   760→   760→              <Label htmlFor="amount">Valor</Label>
+   761→   761→              <div className="relative">
+   762→   762→                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
+   763→   763→                  R$
+   764→   764→                </span>
+   765→   765→                <Input
+   766→   766→                  id="amount"
+   767→   767→                  type="number"
+   768→   768→                  step="0.01"
+   769→   769→                  min="0"
+   770→   770→                  inputMode="decimal"
+   771→   771→                  placeholder="0,00"
+   772→   772→                  value={form.amount}
+   773→   773→                  onChange={(e) => update("amount", e.target.value)}
+   774→   774→                  className="pl-9"
+   775→   775→                />
+   776→   776→              </div>
+   777→   777→            </div>
+   778→   778→            <div className="space-y-1.5">
+   779→   779→              <Label htmlFor="date">Data</Label>
+   780→   780→              <Input
+   781→   781→                id="date"
+   782→   782→                type="date"
+   783→   783→                value={form.date}
+   784→   784→                onChange={(e) => update("date", e.target.value)}
+   785→   785→                className="w-full"
+   786→   786→              />
+   787→   787→            </div>
+   788→   788→          </div>
+   789→   789→
+   790→   790→          {/* Descrição */}
+   791→   791→          <div className="space-y-1.5">
+   792→   792→            <Label htmlFor="description">Descrição</Label>
+   793→   793→            <Input
+   794→   794→              id="description"
+   795→   795→              type="text"
+   796→   796→              placeholder="Ex: Aluguel, Salário, Mercado..."
+   797→   797→              value={form.description}
+   798→   798→              onChange={(e) => update("description", e.target.value)}
+   799→   799→            />
+   800→   800→          </div>
+   801→   801→
+   802→   802→          {/* Conta */}
+   803→   803→          <div className="space-y-1.5">
+   804→   804→            <Label htmlFor="account">
+   805→   805→              {isTransfer ? "Conta de origem" : "Conta"}
+   806→   806→            </Label>
+   807→   807→            <Select
+   808→   808→              value={form.accountId || undefined}
+   809→   809→              onValueChange={handleAccountChange}
+   810→   810→            >
+   811→   811→              <SelectTrigger id="account" className="w-full">
+   812→   812→                <SelectValue placeholder="Selecione uma conta" />
+   813→   813→              </SelectTrigger>
+   814→   814→              <SelectContent>
+   815→   815→                {accounts.map((a) => (
+   816→   816→                  <SelectItem key={a.id} value={a.id}>
+   817→   817→                    {a.name}
+   818→   818→                  </SelectItem>
+   819→   819→                ))}
+   820→   820→              </SelectContent>
+   821→   821→            </Select>
+   822→   822→          </div>
+   823→   823→
+   824→   824→          {/* Categoria (only income/expense) */}
+   825→   825→          {!isTransfer && (
+   826→   826→            <div className="space-y-1.5">
+   827→   827→              <Label htmlFor="category">Categoria</Label>
+   828→   828→              <Select
+   829→   829→                value={form.categoryId || undefined}
+   830→   830→                onValueChange={(v) => update("categoryId", v)}
+   831→   831→              >
+   832→   832→                <SelectTrigger id="category" className="w-full">
+   833→   833→                  <SelectValue placeholder="Selecione uma categoria" />
+   834→   834→                </SelectTrigger>
+   835→   835→                <SelectContent>
+   836→   836→                  {filteredCategories.length === 0 ? (
+   837→   837→                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+   838→   838→                      Nenhuma categoria disponível
+   839→   839→                    </div>
+   840→   840→                  ) : (
+   841→   841→                    filteredCategories.map((c) => (
+   842→   842→                      <SelectItem key={c.id} value={c.id}>
+   843→   843→                        <span className="inline-flex items-center gap-2">
+   844→   844→                          <span
+   845→   845→                            className="h-2 w-2 rounded-full"
+   846→   846→                            style={{ backgroundColor: c.color }}
+   847→   847→                          />
+   848→   848→                          {c.name}
+   849→   849→                        </span>
+   850→   850→                      </SelectItem>
+   851→   851→                    ))
+   852→   852→                  )}
+   853→   853→                </SelectContent>
+   854→   854→              </Select>
+   855→   855→            </div>
+   856→   856→          )}
+   857→   857→
+   858→   858→          {/* Conta de destino (only transfer) */}
+   859→   859→          {isTransfer && (
+   860→   860→            <div className="space-y-1.5">
+   861→   861→              <Label htmlFor="transferTo">Conta de destino</Label>
+   862→   862→              <Select
+   863→   863→                value={form.transferToAccountId || undefined}
+   864→   864→                onValueChange={(v) => update("transferToAccountId", v)}
+   865→   865→              >
+   866→   866→                <SelectTrigger id="transferTo" className="w-full">
+   867→   867→                  <SelectValue placeholder="Selecione a conta de destino" />
+   868→   868→                </SelectTrigger>
+   869→   869→                <SelectContent>
+   870→   870→                  {availableDestAccounts.length === 0 ? (
+   871→   871→                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+   872→   872→                      Nenhuma conta disponível
+   873→   873→                    </div>
+   874→   874→                  ) : (
+   875→   875→                    availableDestAccounts.map((a) => (
+   876→   876→                      <SelectItem key={a.id} value={a.id}>
+   877→   877→                        {a.name}
+   878→   878→                      </SelectItem>
+   879→   879→                    ))
+   880→   880→                  )}
+   881→   881→                </SelectContent>
+   882→   882→              </Select>
+   883→   883→            </div>
+   884→   884→          )}
+   885→   885→
+   886→   886→          <DialogFooter className="gap-2 pt-2">
+   887→   887→            <Button
+   888→   888→              type="button"
+   889→   889→              variant="outline"
+   890→   890→              onClick={() => onOpenChange(false)}
+   891→   891→              disabled={mutation.isPending}
+   892→   892→            >
+   893→   893→              Cancelar
+   894→   894→            </Button>
+   895→   895→            <Button type="submit" disabled={mutation.isPending}>
+   896→   896→              {mutation.isPending && (
+   897→   897→                <Loader2 className="h-4 w-4 animate-spin" />
+   898→   898→              )}
+   899→   899→              {editing ? "Salvar alterações" : "Criar transação"}
+   900→   900→            </Button>
+   901→   901→          </DialogFooter>
+   902→   902→        </form>
+   903→   903→      </DialogContent>
+   904→   904→    </Dialog>
+   905→   905→  );
+   906→   906→}
+   907→   907→
+   908→   908→// ---------------- Delete confirmation ----------------
+   909→   909→
+   910→   910→function DeleteDialog({
+   911→   911→  transaction,
+   912→   912→  open,
+   913→   913→  onOpenChange,
+   914→   914→}: {
+   915→   915→  transaction: Transaction | null;
+   916→   916→  open: boolean;
+   917→   917→  onOpenChange: (open: boolean) => void;
+   918→   918→}) {
+   919→   919→  const queryClient = useQueryClient();
+   920→   920→  const mutation = useMutation({
+   921→   921→    mutationFn: async () => {
+   922→   922→      if (!transaction) throw new Error("Transação inválida.");
+   923→   923→      const res = await fetch(
+   924→   924→        `/api/finpro/transactions/${transaction.id}`,
+   925→   925→        { method: "DELETE" }
+   926→   926→      );
+   927→   927→      const data = await res.json().catch(() => ({}));
+   928→   928→      if (!res.ok) {
+   929→   929→        throw new Error(data?.error ?? "Erro ao excluir transação.");
+   930→   930→      }
+   931→   931→      return data;
+   932→   932→    },
+   933→   933→    onSuccess: () => {
+   934→   934→      toast.success("Transação excluída!");
+   935→   935→      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+   936→   936→      useFinProStore.getState().triggerRefresh();
+   937→   937→      onOpenChange(false);
+   938→   938→    },
+   939→   939→    onError: (err: Error) => {
+   940→   940→      toast.error(err.message);
+   941→   941→    },
+   942→   942→  });
+   943→   943→
+   944→   944→  return (
+   945→   945→    <AlertDialog open={open} onOpenChange={onOpenChange}>
+   946→   946→      <AlertDialogContent>
+   947→   947→        <AlertDialogHeader>
+   948→   948→          <AlertDialogTitle>Excluir transação?</AlertDialogTitle>
+   949→   949→          <AlertDialogDescription>
+   950→   950→            {transaction
+   951→   951→              ? `Esta ação não pode ser desfeita. A transação "${transaction.description}" será removida permanentemente.`
+   952→   952→              : "Esta ação não pode ser desfeita."}
+   953→   953→          </AlertDialogDescription>
+   954→   954→        </AlertDialogHeader>
+   955→   955→        <AlertDialogFooter>
+   956→   956→          <AlertDialogCancel disabled={mutation.isPending}>
+   957→   957→            Cancelar
+   958→   958→          </AlertDialogCancel>
+   959→   959→          <AlertDialogAction
+   960→   960→            onClick={(e) => {
+   961→   961→              e.preventDefault();
+   962→   962→              mutation.mutate();
+   963→   963→            }}
+   964→   964→            disabled={mutation.isPending}
+   965→   965→            className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60"
+   966→   966→          >
+   967→   967→            {mutation.isPending && (
+   968→   968→              <Loader2 className="h-4 w-4 animate-spin" />
+   969→   969→            )}
+   970→   970→            Excluir
+   971→   971→          </AlertDialogAction>
+   972→   972→        </AlertDialogFooter>
+   973→   973→      </AlertDialogContent>
+   974→   974→    </AlertDialog>
+   975→   975→  );
+   976→   976→}
+   977→   977→
+   978→   978→// ---------------- Main view ----------------
+   979→   979→
+   980→   980→export function TransactionsView() {
+   981→   981→  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+   982→   982→  const [formOpen, setFormOpen] = useState(false);
+   983→   983→  const [editing, setEditing] = useState<Transaction | null>(null);
+   984→   984→  // formSession forces the dialog to remount on each open so form state
+   985→   985→  // initializes cleanly for create/edit without stale data
+   986→   986→  const [formSession, setFormSession] = useState(0);
+   987→   987→  const [deleteOpen, setDeleteOpen] = useState(false);
+   988→   988→  const [toDelete, setToDelete] = useState<Transaction | null>(null);
+   989→   989→
+   990→   990→  const queryParams = useMemo(() => {
+   991→   991→    const params = new URLSearchParams();
+   992→   992→    if (filters.type && filters.type !== "all")
+   993→   993→      params.set("type", filters.type);
+   994→   994→    if (filters.accountId && filters.accountId !== "all")
+   995→   995→      params.set("accountId", filters.accountId);
+   996→   996→    if (filters.categoryId && filters.categoryId !== "all")
+   997→   997→      params.set("categoryId", filters.categoryId);
+   998→   998→    if (filters.from) params.set("from", filters.from);
+   999→   999→    if (filters.to) params.set("to", filters.to);
+  1000→  1000→    if (filters.search.trim()) params.set("search", filters.search.trim());
+  1001→  1001→    return params.toString();
+  1002→  1002→  }, [filters]);
+  1003→  1003→
+  1004→  1004→  const { data: transactions = [], isLoading: txLoading } = useQuery({
+  1005→  1005→    queryKey: ["transactions", filters],
+  1006→  1006→    queryFn: async () => {
+  1007→  1007→      const res = await fetch(`/api/finpro/transactions?${queryParams}`);
+  1008→  1008→      if (!res.ok) {
+  1009→  1009→        throw new Error("Erro ao carregar transações.");
+  1010→  1010→      }
+  1011→  1011→      return res.json() as Promise<Transaction[]>;
+  1012→  1012→    },
+  1013→  1013→  });
+  1014→  1014→
+  1015→  1015→  const { data: accounts = [] } = useQuery<Account[]>({
+  1016→  1016→    queryKey: ["accounts"],
+  1017→  1017→    queryFn: async () => {
+  1018→  1018→      const res = await fetch("/api/finpro/accounts");
+  1019→  1019→      if (!res.ok) throw new Error("Erro ao carregar contas.");
+  1020→  1020→      return res.json();
+  1021→  1021→    },
+  1022→  1022→  });
+  1023→  1023→
+  1024→  1024→  const { data: categories = [] } = useQuery<Category[]>({
+  1025→  1025→    queryKey: ["categories", "all"],
+  1026→  1026→    queryFn: async () => {
+  1027→  1027→      const res = await fetch("/api/finpro/categories");
+  1028→  1028→      if (!res.ok) throw new Error("Erro ao carregar categorias.");
+  1029→  1029→      return res.json();
+  1030→  1030→    },
+  1031→  1031→  });
+  1032→  1032→
+  1033→  1033→  const handleResetFilters = () => setFilters(DEFAULT_FILTERS);
+  1034→  1034→
+  1035→  1035→  const openCreate = () => {
+  1036→  1036→    setEditing(null);
+  1037→  1037→    setFormSession((s) => s + 1);
+  1038→  1038→    setFormOpen(true);
+  1039→  1039→  };
+  1040→  1040→
+  1041→  1041→  const openEdit = (t: Transaction) => {
+  1042→  1042→    setEditing(t);
+  1043→  1043→    setFormSession((s) => s + 1);
+  1044→  1044→    setFormOpen(true);
+  1045→  1045→  };
+  1046→  1046→
+  1047→  1047→  const openDelete = (t: Transaction) => {
+  1048→  1048→    setToDelete(t);
+  1049→  1049→    setDeleteOpen(true);
+  1050→  1050→  };
+  1051→  1051→
+  1052→  1052→  const count = transactions.length;
+  1053→  1053→
+  1054→  1054→  return (
+  1055→  1055→    <div className="space-y-5">
+  1056→  1056→      {/* Header row */}
+  1057→  1057→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  1058→  1058→        <p className="text-sm text-muted-foreground">
+  1059→  1059→          {count}{" "}
+  1060→  1060→          {count === 1 ? "transação encontrada" : "transações encontradas"}
+  1061→  1061→        </p>
+  1062→  1062→        <Button onClick={openCreate} className="w-full sm:w-auto">
+  1063→  1063→          <Plus className="h-4 w-4" />
+  1064→  1064→          Nova transação
+  1065→  1065→        </Button>
+  1066→  1066→      </div>
+  1067→  1067→
+  1068→  1068→      {/* Filters */}
+  1069→  1069→      <FilterBar
+  1070→  1070→        filters={filters}
+  1071→  1071→        setFilters={setFilters}
+  1072→  1072→        accounts={accounts}
+  1073→  1073→        categories={categories}
+  1074→  1074→        onReset={handleResetFilters}
+  1075→  1075→      />
+  1076→  1076→
+  1077→  1077→      {/* Summary */}
+  1078→  1078→      <SummaryCards transactions={transactions} />
+  1079→  1079→
+  1080→  1080→      {/* Table */}
+  1081→  1081→      <TransactionsTable
+  1082→  1082→        transactions={transactions}
+  1083→  1083→        isLoading={txLoading}
+  1084→  1084→        onEdit={openEdit}
+  1085→  1085→        onDelete={openDelete}
+  1086→  1086→      />
+  1087→  1087→
+  1088→  1088→      {/* Form dialog — remounts on each open via formSession */}
+  1089→  1089→      <TransactionFormDialog
+  1090→  1090→        key={formSession}
+  1091→  1091→        open={formOpen}
+  1092→  1092→        onOpenChange={setFormOpen}
+  1093→  1093→        editing={editing}
+  1094→  1094→        accounts={accounts}
+  1095→  1095→        categories={categories}
+  1096→  1096→      />
+  1097→  1097→
+  1098→  1098→      {/* Delete dialog */}
+  1099→  1099→      <DeleteDialog
+  1100→  1100→        transaction={toDelete}
+  1101→  1101→        open={deleteOpen}
+  1102→  1102→        onOpenChange={setDeleteOpen}
+  1103→  1103→      />
+  1104→  1104→    </div>
+  1105→  1105→  );
+  1106→  1106→}
+  1107→  1107→
