@@ -1,8 +1,13 @@
 // Seed do FinPro — popula o banco com dados realistas brasileiros
 // Executa com: bun run prisma/seed.ts
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const db = new PrismaClient();
+
+// Usuário demo (login: demo@finpro.com / senha: demo123)
+const DEMO_EMAIL = "demo@finpro.com";
+const DEMO_PASSWORD = "demo123";
 
 const monthsAgo = (months: number, day = 15) => {
   const d = new Date();
@@ -20,24 +25,37 @@ async function main() {
   await db.transaction.deleteMany();
   await db.category.deleteMany();
   await db.account.deleteMany();
+  await db.user.deleteMany();
+
+  // ---------------- USUÁRIO DEMO ----------------
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+  const demoUser = await db.user.create({
+    data: {
+      name: "Usuário Demo",
+      email: DEMO_EMAIL,
+      passwordHash,
+    },
+  });
+  const userId = demoUser.id;
+  console.log(`👤 Usuário demo criado: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
 
   // ---------------- CONTAS ----------------
   const contas = await db.$transaction([
     db.account.create({
-      data: { name: "Carteira", type: "cash", initialBalance: 300, color: "#10B981" },
+      data: { name: "Carteira", type: "cash", initialBalance: 300, color: "#10B981", userId },
     }),
     db.account.create({
-      data: { name: "Banco Nubank", type: "bank", initialBalance: 4500, color: "#8B5CF6" },
+      data: { name: "Banco Nubank", type: "bank", initialBalance: 4500, color: "#8B5CF6", userId },
     }),
     db.account.create({
-      data: { name: "Cartão de Crédito", type: "card", initialBalance: 0, color: "#EF4444" },
+      data: { name: "Cartão de Crédito", type: "card", initialBalance: 0, color: "#EF4444", userId },
     }),
   ]);
   const [carteira, banco, cartao] = contas;
 
   // ---------------- CATEGORIAS ----------------
   const cat = (name: string, type: string, color: string, icon: string) =>
-    db.category.create({ data: { name, type, color, icon } });
+    db.category.create({ data: { name, type, color, icon, userId } });
 
   const [salario, freela, investimento] = await Promise.all([
     cat("Salário", "income", "#10B981", "Banknote"),
@@ -66,7 +84,7 @@ async function main() {
     categoryId: string | null
   ) =>
     db.transaction.create({
-      data: { type, amount, description, date, accountId, categoryId },
+      data: { type, amount, description, date, accountId, categoryId, userId },
     });
 
   const transacoes = [] as ReturnType<typeof tx>[];
@@ -115,11 +133,11 @@ async function main() {
   const ano = now.getFullYear();
 
   await db.$transaction([
-    db.budget.create({ data: { amount: 600, month: mes, year: ano, categoryId: alimentacao.id, accountId: banco.id } }),
-    db.budget.create({ data: { amount: 200, month: mes, year: ano, categoryId: transporte.id, accountId: banco.id } }),
-    db.budget.create({ data: { amount: 300, month: mes, year: ano, categoryId: lazer.id, accountId: cartao.id } }),
-    db.budget.create({ data: { amount: 250, month: mes, year: ano, categoryId: compras.id, accountId: cartao.id } }),
-    db.budget.create({ data: { amount: 150, month: mes, year: ano, categoryId: assinaturas.id, accountId: cartao.id } }),
+    db.budget.create({ data: { amount: 600, month: mes, year: ano, categoryId: alimentacao.id, accountId: banco.id, userId } }),
+    db.budget.create({ data: { amount: 200, month: mes, year: ano, categoryId: transporte.id, accountId: banco.id, userId } }),
+    db.budget.create({ data: { amount: 300, month: mes, year: ano, categoryId: lazer.id, accountId: cartao.id, userId } }),
+    db.budget.create({ data: { amount: 250, month: mes, year: ano, categoryId: compras.id, accountId: cartao.id, userId } }),
+    db.budget.create({ data: { amount: 150, month: mes, year: ano, categoryId: assinaturas.id, accountId: cartao.id, userId } }),
   ]);
 
   // ---------------- METAS ----------------
@@ -130,6 +148,7 @@ async function main() {
       currentAmount: 3500,
       deadline: monthsAgo(-6, 1),
       color: "#10B981",
+      userId,
     },
   });
   const meta2 = await db.goal.create({
@@ -139,6 +158,7 @@ async function main() {
       currentAmount: 1850,
       deadline: monthsAgo(-4, 1),
       color: "#06B6D4",
+      userId,
     },
   });
   const meta3 = await db.goal.create({
@@ -149,6 +169,7 @@ async function main() {
       deadline: monthsAgo(-1, 1),
       color: "#8B5CF6",
       isCompleted: true,
+      userId,
     },
   });
 
@@ -162,8 +183,9 @@ async function main() {
   ]);
 
   console.log("✅ Seed concluído!");
+  console.log(`   • 1 usuário (demo@finpro.com / demo123)`);
   console.log(`   • ${contas.length} contas`);
-  console.log(`   • ${3 + 8} categorias`);
+  console.log(`   • 11 categorias`);
   console.log(`   • ${transacoes.length} transações`);
   console.log(`   • 5 orçamentos`);
   console.log(`   • 3 metas`);

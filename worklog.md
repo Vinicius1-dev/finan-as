@@ -160,3 +160,77 @@ Stage Summary:
 - Dark mode e responsividade mobile confirmados
 - Footer sticky ao final, sidebar fixa em desktop
 - Projeto pronto para portfólio
+
+---
+Task ID: 6
+Agent: general-purpose (auth frontend)
+Task: Build AuthScreen (login/register) + SessionProvider + integrate auth gating in AppShell
+
+Work Log:
+- Lido o worklog completo (Tasks 1, 4, 5-6, 7-8, 9, 10) e inspecionados os arquivos de referência: layout.tsx (estrutura ThemeProvider > QueryProvider > children + 2 toasters), app-shell.tsx (SidebarContent/ThemeToggle/ViewRouter/AppShell), lib/auth.ts (authOptions com Credentials provider + authorize que lança Error com mensagens pt-BR, getCurrentUser/requireUser helpers), api/auth/me/route.ts (GET retorna {user: {id,email,name,createdAt}|null}), api/auth/register/route.ts (POST cria user + 11 categorias padrão, retorna 201 ou 400/409), api/auth/[...nextauth]/route.ts (handler NextAuth), components/ui/{tabs,card,button,input,label}.tsx, components/query-provider.tsx, store/finpro-store.ts, package.json (next-auth 4.24.11 confirmado), globals.css (--primary emerald oklch(0.62 0.15 160)). Verificado que o seed.ts já cria o usuário demo (demo@finpro.com / demo123).
+- Criado `src/components/session-provider.tsx`: wrapper client-side "use client" que re-exporta `SessionProvider` do next-auth/react sob o nome `NextAuthSessionProvider` (evita a recursão ingênua da spec). Componente leve, pronto para envolver a app no layout.
+- Criado `src/components/finpro/auth-screen.tsx` (~400 linhas). Estrutura:
+  * `HeroPanel` (desktop only, hidden on mobile): panel bg-primary text-primary-foreground com 3 círculos decorativos bg-primary-foreground/5 blur-2xl; brand (PieChart em rounded-xl bg-primary-foreground/15 + wordmark "FinPro"); badge "Gestor de finanças pessoais" com Sparkles; headline "Suas finanças, sob controle."; subtitle "Controle receitas, despesas, orçamentos e metas em um só lugar."; lista de 4 features com check emerald (TrendingUp "Dashboard completo com gráficos", Target "Orçamentos e metas inteligentes", FileBarChart "Relatórios e exportação CSV", ShieldCheck "Seus dados ficam privados e seguros"); footer "Feito com Next.js, Prisma e shadcn/ui".
+  * `MobileBrandHeader` (lg:hidden): PieChart + wordmark + "Gestor de finanças pessoais" — header compacto no topo do mobile.
+  * `Field` helper: wrapper de Input com Label acima + ícone à esquerda (Mail/Lock/User) absolutamente posicionado + Input com pl-9. Props: id, label, type, placeholder, value, onChange, autoComplete, icon, disabled.
+  * `AuthScreen` (export nomeado e default): estado `tab` ("login"|"register"), estados separados para login (loginEmail, loginPassword, isLoginLoading) e register (regName, regEmail, regPassword, isRegisterLoading). Layout: grid lg:grid-cols-2 min-h-screen com HeroPanel à esquerda e painel direito flex items-center justify-center p-5/8; painel direito contém MobileBrandHeader + Card (border-border/60 shadow-lg) com CardHeader (title dinâmico "Acessar conta" / "Criar sua conta" + description) e CardContent com Tabs (TabsList grid-cols-2 "Entrar"/"Criar conta").
+  * Login form (TabsContent "login"): Field email + Field password + Button size=lg w-full type=submit "Entrar" com ArrowRight; loading state mostra Loader2 animate-spin + "Entrando..." e disabled.
+  * Register form (TabsContent "register"): Field name + Field email + Field password + Button "Criar conta" com ArrowRight; loading state "Criando conta..."; validação client-side em onRegisterSubmit: nome obrigatório, email obrigatório, password.length < 6 → toast.error "A senha deve ter no mínimo 6 caracteres." (não chama a API).
+  * `handleLogin(email, password)`: chama signIn("credentials", {email, password, redirect: false}). Se res.error truthy: se for "CredentialsSignin" mostra fallback "Email ou senha incorretos.", senão mostra o error retornado (que é a mensagem lançada por authorize, e.g. "Email ou senha incorretos."). Em sucesso: toast.success("Bem-vindo!") + onSuccess?.(). Catch genérico com toast.error "Não foi possível entrar agora. Tente novamente.".
+  * `onRegisterSubmit`: valida campos → fetch POST /api/auth/register com JSON {name, email, password}. Se !res.ok: parseia JSON {error} e toast.error (e.g. "Este email já está cadastrado." para 409). Se ok (201): chama signIn("credentials", {email, password, redirect: false}) para auto-login. Se auto-login falhar (raro): toast.success "Conta criada! Faça login para continuar." + troca para tab login com email pre-preenchido. Em sucesso: toast.success("Conta criada com sucesso!") + onSuccess?.(). Catch genérico com toast.error.
+  * `handleDemoAccess`: setTab("login") + setLoginEmail(DEMO_EMAIL) + setLoginPassword(DEMO_PASSWORD) + await 80ms + handleLogin(DEMO_EMAIL, DEMO_PASSWORD). Usa constantes (não state) para garantir que handleLogin receba os valores corretos mesmo se o React ainda não re-renderizou.
+  * "Acessar conta demo" Button variant=outline size=lg w-full (visível em ambos os tabs, abaixo de um divider "ou" com bg-card). Mostra Sparkles text-primary quando idle e Loader2 spin quando loading. Tem microcopy "demo@finpro.com · demo123" abaixo.
+  * Note final: "Ao continuar, você concorda em usar o FinPro para fins pessoais." text-[11px] muted-foreground text-center.
+  * Estados disabled propagam anyLoading (login OU register) para todos os Fields e botões — evita duplo submit.
+- Modificado `src/app/layout.tsx`: importado `SessionProvider` from `@/components/session-provider` e envolvido `{children}` + `<Toaster/>` + `<SonnerToaster/>` dentro de `<SessionProvider>` dentro de `<QueryProvider>` (ordem: ThemeProvider > QueryProvider > SessionProvider > children). ThemeProvider, QueryProvider e os 2 toasters preservados intactos. metadata e fontes Geist/Geist_Mono preservados.
+- Modificado `src/components/finpro/app-shell.tsx`:
+  * Imports adicionados: useQuery + useQueryClient de @tanstack/react-query, signOut de next-auth/react, toast de sonner, LogOut + Loader2 de lucide-react, AuthScreen de `@/components/finpro/auth-screen`. Todos os imports originais preservados.
+  * Tipos `AuthUser` ({id, email, name: string|null, createdAt: string}) e `AuthMeResponse` ({user: AuthUser | null}) declarados no arquivo.
+  * Hook `useAuth()`: useQuery<AuthUser | null, Error> com queryKey ["auth", "me"], queryFn fetch GET /api/auth/me com cache: "no-store", parseia JSON, retorna data.user ?? null. staleTime 60s, retry 1. Retorna {user: query.data ?? null, isLoading: query.isLoading, refetch: query.refetch}.
+  * Helper `getInitial(name, email)`: retorna primeira letra do name se existir, senão primeira letra do email (uppercase).
+  * `SidebarContent` estendido com 3 props novas (user, onLogout, isLoggingOut) mantendo onNavigate. Layout original preservado (brand header + nav). Adicionada seção "User info + logout" ANTES do box "Dica": border-t + flex items-center gap-2.5 p-2; avatar circular 9x9 bg-primary text-primary-foreground com a inicial; nome (user.name?.trim() || user.email.split("@")[0]) truncate + email truncate muted-foreground; Button ghost size=icon h-8 w-8 com LogOut (ou Loader2 spin se isLoggingOut) — aria-label="Sair", title="Sair". Box "Dica" preservado abaixo.
+  * `FullScreenLoader` (novo): min-h-screen flex flex-col items-center justify-center gap-3 bg-primary/5; PieChart em rounded-xl bg-primary shadow-lg shadow-primary/20; texto "Carregando FinPro..." com Loader2 animate-spin.
+  * `AppShell` modificado: adicionado useQueryClient, useAuth(), isLoggingOut state. `handleLogout()`: se já está fazendo logout, return; setIsLoggingOut(true); signOut({redirect: false}); queryClient.clear() (limpa cache para evitar vazar dados entre usuários); toast.success("Até logo!"); await refetch(); catch com toast.error "Não foi possível sair agora. Tente novamente."; finally setIsLoggingOut(false). Render gating: isLoading → FullScreenLoader; !user → AuthScreen onSuccess={() => refetch()}; user → app shell original com SidebarContent recebendo user/onLogout/isLoggingOut (tanto no aside desktop quanto no Sheet mobile).
+  * Tudo o mais (NAV_ITEMS, VIEW_TITLES, ThemeToggle, ViewRouter, header, main, footer sticky) preservado intacto.
+- Verificações: `bunx tsc --noEmit` — nenhum erro nos 4 arquivos modificados (errors residuais em examples/skills/api routes são pré-existentes e não relacionados). `bunx eslint` nos 4 arquivos — exit code 0, sem warnings/errors.
+- Testes end-to-end via Agent Browser (após restart do dev server para limpar cache stale do PrismaClient — o dev anterior tinha um globalForPrisma.prisma cacheado de antes do modelo User ser adicionado ao schema, o que fazia authorize() lançar "Cannot read properties of undefined (reading 'findUnique')"):
+  1. Página inicial (não autenticado): AuthScreen renderiza com tabs Entrar/Criar conta, hero panel à esquerda no desktop, form card à direita. ✅
+  2. Botão "Acessar conta demo": preenche demo@finpro.com/demo123 e auto-submit → POST /api/auth/callback/credentials 200 → toast "Bem-vindo!" → dashboard carrega com dados do usuário demo (Saldo Total R$14.972,80, Receitas R$5.942,00, etc.). ✅
+  3. Login com senha errada: POST 401 → toast.error "Email ou senha incorretos." (mensagem propagada do authorize via signIn response). ✅
+  4. Tab "Criar conta" + registro de novo usuário (Teste Portfólio / teste.portfolio@finpro.com / senha123): POST /api/auth/register 201 → auto-login → dashboard com empty states "Sem despesas" / "Nenhuma transação ainda" (prova isolamento de dados — novo usuário não vê dados do demo). ✅
+  5. Registro com email duplicado: POST /api/auth/register 409 → toast.error "Este email já está cadastrado." (parseado do JSON {error}). ✅
+  6. Validação client-side senha < 6 chars: toast.error "A senha deve ter no mínimo 6 caracteres." sem chamar a API. ✅
+  7. Sidebar com user logado: avatar com inicial + "Usuário Demo" + "demo@finpro.com" + botão "Sair" — acima do box "Dica" preservado. ✅
+  8. Botão "Sair": POST /api/auth/signout 200 → toast.success "Até logo!" → retorna para AuthScreen. ✅
+  9. Estado de loading: FullScreenLoader com PieChart + "Carregando FinPro..." visível brevemente durante GET /api/auth/me inicial. ✅
+
+Stage Summary:
+- Arquivos criados: `src/components/session-provider.tsx` (~10 linhas, wrapper SessionProvider do next-auth/react) e `src/components/finpro/auth-screen.tsx` (~400 linhas, AuthScreen completa com hero panel + tabs + login/register forms + demo access + loading/error states).
+- Arquivos modificados: `src/app/layout.tsx` (adicionado SessionProvider envolvendo children+toasters dentro de QueryProvider — ThemeProvider e fontes preservados) e `src/components/finpro/app-shell.tsx` (adicionados useAuth hook, FullScreenLoader, auth gating isLoading/!user/user, seção user info + Sair no SidebarContent, handleLogout com queryClient.clear para evitar leak de dados entre usuários — NAV_ITEMS/VIEW_TITLES/ThemeToggle/ViewRouter/header/main/footer preservados).
+- Decisões de design: tema emerald primary respeitado (bg-primary/text-primary-foreground no hero panel, avatar do sidebar, botão demo Sparkles text-primary, FullScreenLoader bg-primary/5); indigo/blue nunca usados como primary; layout split lg:grid-cols-2 com hero hidden no mobile (lg:flex) e MobileBrandHeader compacto no lugar; Tabs shadcn para alternar Entrar/Criar conta; Card shadcn para o form; Field helper para inputs com ícone à esquerda; Button size=lg w-full para submit; estado disabled propagado via anyLoading; divider "ou" entre form e botão demo; note de consentimento "Ao continuar, você concorda em usar o FinPro para fins pessoais."; fallback amigável "Email ou senha incorretos." quando signIn retorna error === "CredentialsSignin" (caso raro em que a mensagem custom do authorize não chega); auto-login após registro bem-sucedido (se auto-login falhar, troca para tab login com email pre-preenchido); queryClient.clear() no logout para garantir isolamento de dados entre usuários.
+- Decisões técnicas: useAuth como hook local (no mesmo arquivo do AppShell) em vez de hook separado — mantém o acoplamento baixo e facilita a leitura; refetch via onSuccess callback (em vez de useSession) para não depender do polling do SessionProvider e ter controle explícito do estado; cache: "no-store" no fetch /api/auth/me para sempre refletir o estado real do servidor; isLoggingOut state separado para desabilitar o botão Sair durante o signOut assíncrono.
+- Próximos passos sugeridos: nenhum — auth frontend completo e testado end-to-end. O projeto está pronto para o portfólio (auth + 7 views + dark mode + responsivo + dados isolados por usuário).
+
+---
+Task ID: 7
+Agent: main (Z.ai Code)
+Task: Verificação final de autenticação com Agent Browser
+
+Work Log:
+- Verificada tela de auth: tabs Entrar/Criar conta, botão "Acessar conta demo"
+- Testado login demo: dashboard carregou com R$ 14.972,80 (dados intactos)
+- Testado logout: volta para tela de auth com toast "Até logo!"
+- Testado registro de nova usuária "Ana Teste" (ana@teste.com): auto-login funcionou
+- Confirmado ISOLAMENTO DE DADOS: dashboard da Ana mostra R$ 0,00 (vazio), contas vazias
+- Confirmado categorias padrão criadas automaticamente para nova usuária (3 receitas + 8 despesas)
+- Re-login como demo: dados do demo intactos (R$ 14.972,80) — prova de isolamento entre usuários
+- `bun run lint`: 0 erros
+- Console do browser: 0 erros
+
+Stage Summary:
+- Sistema multi-usuário 100% funcional e verificado
+- Cada usuário tem suas próprias finanças isoladas (contas, transações, categorias, orçamentos, metas)
+- Novos usuários recebem 11 categorias padrão automaticamente
+- Login: demo@finpro.com / demo123 (ou criar conta nova)
+- Todas as API routes validam autenticação e ownership
+- Projeto pronto para portfólio com feature de autenticação completa

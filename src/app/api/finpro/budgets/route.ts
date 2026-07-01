@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireUser, UnauthorizedError } from "@/lib/auth";
 
 // GET /api/finpro/budgets?month=&year=
 export async function GET(req: NextRequest) {
   try {
+    const user = await requireUser();
+    const userId = user.id;
     const { searchParams } = new URL(req.url);
     const now = new Date();
     const month = parseInt(searchParams.get("month") || String(now.getMonth() + 1));
     const year = parseInt(searchParams.get("year") || String(now.getFullYear()));
 
     const budgets = await db.budget.findMany({
-      where: { month, year },
+      where: { userId, month, year },
       include: { category: true, account: true },
       orderBy: { category: { name: "asc" } },
     });
@@ -24,6 +27,7 @@ export async function GET(req: NextRequest) {
         const agg = await db.transaction.aggregate({
           where: {
             type: "expense",
+            userId,
             categoryId: b.categoryId,
             date: { gte: startOfMonth, lte: endOfMonth },
           },
@@ -35,6 +39,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(withSpent);
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
     console.error("[budgets GET] error:", error);
     return NextResponse.json({ error: "Erro ao listar orçamentos" }, { status: 500 });
   }
@@ -43,10 +50,22 @@ export async function GET(req: NextRequest) {
 // POST /api/finpro/budgets
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireUser();
+    const userId = user.id;
     const { amount, month, year, categoryId, accountId } = await req.json();
     if (!amount || !month || !year || !categoryId || !accountId) {
       return NextResponse.json({ error: "Campos obrigatórios ausentes" }, { status: 400 });
     }
+
+    // Valida ownership de categoria e conta
+    const [cat, acc] = await Promise.all([
+      db.category.findFirst({ where: { id: categoryId, userId } }),
+      db.account.findFirst({ where: { id: accountId, userId } }),
+    ]);
+    if (!cat || !acc) {
+      return NextResponse.json({ error: "Categoria ou conta inválida." }, { status: 400 });
+    }
+
     const budget = await db.budget.create({
       data: {
         amount: parseFloat(amount),
@@ -54,11 +73,15 @@ export async function POST(req: NextRequest) {
         year: parseInt(year),
         categoryId,
         accountId,
+        userId,
       },
       include: { category: true, account: true },
     });
     return NextResponse.json({ ...budget, spent: 0 }, { status: 201 });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
     console.error("[budgets POST] error:", error);
     return NextResponse.json({ error: "Erro ao criar orçamento" }, { status: 500 });
   }

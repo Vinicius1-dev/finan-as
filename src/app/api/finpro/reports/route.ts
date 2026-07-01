@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireUser, UnauthorizedError } from "@/lib/auth";
 
 // GET /api/finpro/reports?year=&export=csv
 export async function GET(req: NextRequest) {
   try {
+    const user = await requireUser();
+    const userId = user.id;
     const { searchParams } = new URL(req.url);
     const now = new Date();
     const year = parseInt(searchParams.get("year") || String(now.getFullYear()));
     const exportCsv = searchParams.get("export") === "csv";
+
+    const userTxWhere = { userId };
 
     // Resumo mensal do ano
     const monthly = [];
@@ -17,8 +22,8 @@ export async function GET(req: NextRequest) {
       const s = new Date(year, m, 1);
       const e = new Date(year, m + 1, 0, 23, 59, 59);
       const [inc, exp] = await Promise.all([
-        db.transaction.aggregate({ where: { type: "income", date: { gte: s, lte: e } }, _sum: { amount: true } }),
-        db.transaction.aggregate({ where: { type: "expense", date: { gte: s, lte: e } }, _sum: { amount: true } }),
+        db.transaction.aggregate({ where: { ...userTxWhere, type: "income", date: { gte: s, lte: e } }, _sum: { amount: true } }),
+        db.transaction.aggregate({ where: { ...userTxWhere, type: "expense", date: { gte: s, lte: e } }, _sum: { amount: true } }),
       ]);
       const receitas = inc._sum.amount || 0;
       const despesas = exp._sum.amount || 0;
@@ -36,7 +41,7 @@ export async function GET(req: NextRequest) {
     const startYear = new Date(year, 0, 1);
     const endYear = new Date(year, 11, 31, 23, 59, 59);
     const expenses = await db.transaction.findMany({
-      where: { type: "expense", date: { gte: startYear, lte: endYear } },
+      where: { ...userTxWhere, type: "expense", date: { gte: startYear, lte: endYear } },
       include: { category: true },
     });
     const byCat = new Map<string, { name: string; value: number; color: string }>();
@@ -50,7 +55,7 @@ export async function GET(req: NextRequest) {
 
     if (exportCsv) {
       const allTx = await db.transaction.findMany({
-        where: { date: { gte: startYear, lte: endYear } },
+        where: { ...userTxWhere, date: { gte: startYear, lte: endYear } },
         include: { account: true, category: true },
         orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       });
@@ -86,6 +91,9 @@ export async function GET(req: NextRequest) {
       byCategory,
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
     console.error("[reports GET] error:", error);
     return NextResponse.json({ error: "Erro ao gerar relatório" }, { status: 500 });
   }

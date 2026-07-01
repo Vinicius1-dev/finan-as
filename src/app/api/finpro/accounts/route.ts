@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireUser, UnauthorizedError } from "@/lib/auth";
 
 async function computeBalance(accId: string) {
   const acc = await db.account.findUnique({ where: { id: accId } });
@@ -19,15 +20,23 @@ async function computeBalance(accId: string) {
   );
 }
 
-// GET /api/finpro/accounts
+// GET /api/finpro/accounts — apenas do usuário autenticado
 export async function GET() {
   try {
-    const accounts = await db.account.findMany({ orderBy: { createdAt: "asc" } });
+    const user = await requireUser();
+    const userId = user.id;
+    const accounts = await db.account.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" },
+    });
     const withBalance = await Promise.all(
       accounts.map(async (a) => ({ ...a, balance: await computeBalance(a.id) }))
     );
     return NextResponse.json(withBalance);
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
     console.error("[accounts GET] error:", error);
     return NextResponse.json({ error: "Erro ao listar contas" }, { status: 500 });
   }
@@ -36,6 +45,8 @@ export async function GET() {
 // POST /api/finpro/accounts
 export async function POST(req: NextRequest) {
   try {
+    const user = await requireUser();
+    const userId = user.id;
     const { name, type, initialBalance, color } = await req.json();
     if (!name || !type) {
       return NextResponse.json({ error: "Nome e tipo são obrigatórios" }, { status: 400 });
@@ -46,10 +57,14 @@ export async function POST(req: NextRequest) {
         type,
         initialBalance: parseFloat(initialBalance) || 0,
         color: color || "#6B7280",
+        userId,
       },
     });
     return NextResponse.json({ ...account, balance: account.initialBalance }, { status: 201 });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
     console.error("[accounts POST] error:", error);
     return NextResponse.json({ error: "Erro ao criar conta" }, { status: 500 });
   }

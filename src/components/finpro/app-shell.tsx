@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { signOut } from "next-auth/react";
+import { toast } from "sonner";
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -13,6 +16,8 @@ import {
   Moon,
   Sun,
   Github,
+  LogOut,
+  Loader2,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useFinProStore, type ViewKey } from "@/store/finpro-store";
@@ -23,9 +28,45 @@ import { CategoriesView } from "@/components/finpro/views/categories-view";
 import { BudgetsView } from "@/components/finpro/views/budgets-view";
 import { GoalsView } from "@/components/finpro/views/goals-view";
 import { ReportsView } from "@/components/finpro/views/reports-view";
+import { AuthScreen } from "@/components/finpro/auth-screen";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+
+interface AuthUser {
+  id: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+}
+
+interface AuthMeResponse {
+  user: AuthUser | null;
+}
+
+/**
+ * Hook que verifica o estado de autenticação chamando GET /api/auth/me.
+ * Retorna o usuário atual, estado de loading e função de refetch.
+ */
+function useAuth() {
+  const query = useQuery<AuthUser | null, Error>({
+    queryKey: ["auth", "me"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      if (!res.ok) return null;
+      const data: AuthMeResponse = await res.json();
+      return data.user ?? null;
+    },
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  return {
+    user: query.data ?? null,
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  };
+}
 
 const NAV_ITEMS: {
   key: ViewKey;
@@ -66,7 +107,24 @@ function ThemeToggle() {
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function getInitial(name: string | null, email: string): string {
+  if (name && name.trim().length > 0) {
+    return name.trim().charAt(0).toUpperCase();
+  }
+  return email.charAt(0).toUpperCase();
+}
+
+function SidebarContent({
+  onNavigate,
+  user,
+  onLogout,
+  isLoggingOut,
+}: {
+  onNavigate?: () => void;
+  user: AuthUser | null;
+  onLogout?: () => void;
+  isLoggingOut?: boolean;
+}) {
   const { activeView, setActiveView } = useFinProStore();
 
   return (
@@ -109,6 +167,41 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
+      {/* User info + logout */}
+      {user && (
+        <div className="border-t border-sidebar-border p-3">
+          <div className="flex items-center gap-2.5 rounded-lg p-2">
+            <div
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-semibold shadow-sm"
+              aria-hidden
+            >
+              {getInitial(user.name, user.email)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate">
+                {user.name?.trim() || user.email.split("@")[0]}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+              onClick={onLogout}
+              disabled={isLoggingOut}
+              aria-label="Sair"
+              title="Sair"
+            >
+              {isLoggingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <LogOut className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="border-t border-sidebar-border p-4">
         <div className="rounded-lg bg-sidebar-accent/50 p-3">
           <p className="text-xs font-medium text-muted-foreground">Dica</p>
@@ -143,17 +236,63 @@ function ViewRouter() {
   }
 }
 
+function FullScreenLoader() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-primary/5 text-foreground">
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+        <PieChart className="h-6 w-6" />
+      </div>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Carregando FinPro...
+      </div>
+    </div>
+  );
+}
+
 export function AppShell() {
   const { activeView } = useFinProStore();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const queryClient = useQueryClient();
+  const { user, isLoading, refetch } = useAuth();
   const { title, subtitle } = VIEW_TITLES[activeView];
+
+  async function handleLogout() {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await signOut({ redirect: false });
+      // Limpa cache de queries para evitar vazar dados entre usuários
+      queryClient.clear();
+      toast.success("Até logo!");
+      await refetch();
+    } catch (err) {
+      console.error("[logout] error:", err);
+      toast.error("Não foi possível sair agora. Tente novamente.");
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
+
+  if (isLoading) {
+    return <FullScreenLoader />;
+  }
+
+  if (!user) {
+    return <AuthScreen onSuccess={() => refetch()} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <div className="flex flex-1">
         {/* Sidebar desktop */}
         <aside className="hidden lg:flex w-64 shrink-0 flex-col bg-sidebar border-r border-sidebar-border sticky top-0 h-screen">
-          <SidebarContent />
+          <SidebarContent
+            user={user}
+            onLogout={handleLogout}
+            isLoggingOut={isLoggingOut}
+          />
         </aside>
 
         {/* Conteúdo principal */}
@@ -168,7 +307,12 @@ export function AppShell() {
               </SheetTrigger>
               <SheetContent side="left" className="w-72 p-0">
                 <SheetTitle className="sr-only">Menu de navegação</SheetTitle>
-                <SidebarContent onNavigate={() => setMobileOpen(false)} />
+                <SidebarContent
+                  onNavigate={() => setMobileOpen(false)}
+                  user={user}
+                  onLogout={handleLogout}
+                  isLoggingOut={isLoggingOut}
+                />
               </SheetContent>
             </Sheet>
 

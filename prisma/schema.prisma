@@ -1,5 +1,5 @@
-// FinPro — Gestor de Finanças Pessoais
-// Modelo de dados relacional (equivalente ao que seria feito em Django/SQL)
+// FinPro — Gestor de Finanças Pessoais (multi-usuário)
+// Modelo de dados relacional com isolamento por usuário
 
 generator client {
   provider = "prisma-client-js"
@@ -11,6 +11,24 @@ datasource db {
 }
 
 // ============================================================
+// USUÁRIO — dono de todas as finanças (autenticação via NextAuth)
+// ============================================================
+model User {
+  id           String   @id @default(cuid())
+  name         String?
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts     Account[]
+  categories   Category[]
+  transactions Transaction[]
+  budgets      Budget[]
+  goals        Goal[]
+}
+
+// ============================================================
 // CONTA — onde o dinheiro fica (dinheiro, banco, cartão)
 // ============================================================
 model Account {
@@ -19,13 +37,16 @@ model Account {
   type          String        @default("cash") // cash | bank | card
   initialBalance Float        @default(0)
   color         String        @default("#6B7280")
+  userId        String
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions  Transaction[] @relation("AccountTransactions")
   transfersIn   Transaction[] @relation("TransferTo")
-  budgets        Budget[]
+  budgets       Budget[]
 
+  @@index([userId])
   @@index([type])
 }
 
@@ -38,12 +59,15 @@ model Category {
   type      String        @default("expense") // income | expense
   color     String        @default("#6B7280")
   icon      String        @default("Circle")
+  userId    String
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
   budgets      Budget[]
 
+  @@index([userId])
   @@index([type])
 }
 
@@ -59,14 +83,17 @@ model Transaction {
   accountId   String
   categoryId  String?
   transferToAccountId String?
+  userId      String
 
-  account     Account  @relation("AccountTransactions", fields: [accountId], references: [id])
+  account     Account   @relation("AccountTransactions", fields: [accountId], references: [id])
   category    Category? @relation(fields: [categoryId], references: [id])
-  transferTo  Account? @relation("TransferTo", fields: [transferToAccountId], references: [id])
+  transferTo  Account?  @relation("TransferTo", fields: [transferToAccountId], references: [id])
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([userId])
   @@index([accountId])
   @@index([categoryId])
   @@index([type])
@@ -83,14 +110,17 @@ model Budget {
   year       Int
   categoryId String
   accountId  String
+  userId     String
 
   category   Category @relation(fields: [categoryId], references: [id])
   account    Account  @relation(fields: [accountId], references: [id])
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([categoryId, month, year, accountId])
+  @@index([userId])
   @@index([month, year])
 }
 
@@ -105,10 +135,12 @@ model Goal {
   deadline       DateTime
   color          String   @default("#10B981")
   isCompleted    Boolean  @default(false)
+  userId         String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  contributions GoalContribution[]
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions  GoalContribution[]
 }
 
 model GoalContribution {

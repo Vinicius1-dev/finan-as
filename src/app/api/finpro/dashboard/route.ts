@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireUser, UnauthorizedError } from "@/lib/auth";
 
 // Calcula o saldo real de cada conta considerando receitas, despesas e transferências
-async function computeAccountBalances() {
-  const accounts = await db.account.findMany();
+async function computeAccountBalances(userId: string) {
+  const accounts = await db.account.findMany({ where: { userId } });
 
   const balances = await Promise.all(
     accounts.map(async (acc) => {
@@ -30,31 +31,35 @@ async function computeAccountBalances() {
 
 export async function GET() {
   try {
+    const user = await requireUser();
+    const userId = user.id;
+
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
 
-    // ---- Saldo total + contas ----
-    const accountsWithBalance = await computeAccountBalances();
+    // ---- Saldo total + contas (do usuário) ----
+    const accountsWithBalance = await computeAccountBalances(userId);
     const totalBalance = accountsWithBalance.reduce((s, a) => s + a.balance, 0);
 
-    // ---- Receitas e despesas do mês atual ----
+    // ---- Receitas e despesas do mês atual (do usuário) ----
+    const userTxWhere = { userId };
     const [monthIncomeAgg, monthExpenseAgg, prevIncomeAgg, prevExpenseAgg] = await Promise.all([
       db.transaction.aggregate({
-        where: { type: "income", date: { gte: startOfMonth } },
+        where: { ...userTxWhere, type: "income", date: { gte: startOfMonth } },
         _sum: { amount: true },
       }),
       db.transaction.aggregate({
-        where: { type: "expense", date: { gte: startOfMonth } },
+        where: { ...userTxWhere, type: "expense", date: { gte: startOfMonth } },
         _sum: { amount: true },
       }),
       db.transaction.aggregate({
-        where: { type: "income", date: { gte: startOfPrevMonth, lte: endOfPrevMonth } },
+        where: { ...userTxWhere, type: "income", date: { gte: startOfPrevMonth, lte: endOfPrevMonth } },
         _sum: { amount: true },
       }),
       db.transaction.aggregate({
-        where: { type: "expense", date: { gte: startOfPrevMonth, lte: endOfPrevMonth } },
+        where: { ...userTxWhere, type: "expense", date: { gte: startOfPrevMonth, lte: endOfPrevMonth } },
         _sum: { amount: true },
       }),
     ]);
@@ -73,8 +78,8 @@ export async function GET() {
       const s = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const e = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
       const [inc, exp] = await Promise.all([
-        db.transaction.aggregate({ where: { type: "income", date: { gte: s, lte: e } }, _sum: { amount: true } }),
-        db.transaction.aggregate({ where: { type: "expense", date: { gte: s, lte: e } }, _sum: { amount: true } }),
+        db.transaction.aggregate({ where: { ...userTxWhere, type: "income", date: { gte: s, lte: e } }, _sum: { amount: true } }),
+        db.transaction.aggregate({ where: { ...userTxWhere, type: "expense", date: { gte: s, lte: e } }, _sum: { amount: true } }),
       ]);
       const receitas = inc._sum.amount || 0;
       const despesas = exp._sum.amount || 0;
@@ -86,9 +91,9 @@ export async function GET() {
       });
     }
 
-    // ---- Despesas por categoria (mês atual) ----
+    // ---- Despesas por categoria (mês atual, do usuário) ----
     const monthExpenses = await db.transaction.findMany({
-      where: { type: "expense", date: { gte: startOfMonth } },
+      where: { ...userTxWhere, type: "expense", date: { gte: startOfMonth } },
       include: { category: true },
     });
     const byCat = new Map<string, { name: string; value: number; color: string }>();
@@ -106,9 +111,9 @@ export async function GET() {
       .map((c) => ({ ...c, percentage: totalExpenses > 0 ? (c.value / totalExpenses) * 100 : 0 }))
       .sort((a, b) => b.value - a.value);
 
-    // ---- Receitas por categoria (mês atual) ----
+    // ---- Receitas por categoria (mês atual, do usuário) ----
     const monthIncomes = await db.transaction.findMany({
-      where: { type: "income", date: { gte: startOfMonth } },
+      where: { ...userTxWhere, type: "income", date: { gte: startOfMonth } },
       include: { category: true },
     });
     const byCatInc = new Map<string, { name: string; value: number; color: string }>();
@@ -126,14 +131,15 @@ export async function GET() {
       .map((c) => ({ ...c, percentage: totalIncomes > 0 ? (c.value / totalIncomes) * 100 : 0 }))
       .sort((a, b) => b.value - a.value);
 
-    // ---- Transações recentes ----
+    // ---- Transações recentes (do usuário) ----
     const recentTransactions = await db.transaction.findMany({
+      where: { userId },
       take: 6,
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       include: { account: true, category: true },
     });
 
-    const transactionCount = await db.transaction.count();
+    const transactionCount = await db.transaction.count({ where: { userId } });
 
     return NextResponse.json({
       stats: {
@@ -153,6 +159,9 @@ export async function GET() {
       accounts: accountsWithBalance,
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
     console.error("[dashboard] error:", error);
     return NextResponse.json({ error: "Erro ao carregar dashboard" }, { status: 500 });
   }
